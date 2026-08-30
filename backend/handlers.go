@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const tmpRoot = "/tmp/pilot-diff-jobs"
+var tmpRoot = filepath.Join(os.TempDir(), "pilot-diff-jobs")
 
 func parseOptions(c *fiber.Ctx) LoadOptions {
 	b := func(key string) bool {

@@ -20,7 +20,17 @@ type HistoryEntry struct {
 
 var historyMu sync.Mutex
 
-const historyFile = "/app/data/history.jsonl"
+var historyFile = filepath.Join(appDataDir(), "history.jsonl")
+
+// appDataDir resolves to %AppData%\pilot-diff on Windows, ~/.config/pilot-diff
+// on Linux/macOS — a persistent per-user folder, unlike the OS temp dir.
+func appDataDir() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "pilot-diff")
+}
 
 func AppendHistory(entry HistoryEntry) error {
 	historyMu.Lock()
