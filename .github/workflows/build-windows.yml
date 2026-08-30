@@ -1,0 +1,35 @@
+name: Build Windows exe (spike)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install mingw-w64 gcc (needed for CGO / go-duckdb)
+        run: choco install mingw --version=13.2.0 -y
+
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go build -o pilot-diff.exe .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pilot-diff-exe
+          path: backend/pilot-diff.exe
