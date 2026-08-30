@@ -47,9 +47,21 @@ jobs:
           nuget install Microsoft.Web.WebView2 -Version 1.0.2592.51 -OutputDirectory webview2-pkg
           Copy-Item -Path "webview2-pkg/Microsoft.Web.WebView2.*/build/native/x64/WebView2Loader.dll" -Destination backend/WebView2Loader.dll
 
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\setup.iss
+
       - uses: actions/upload-artifact@v4
         with:
-          name: pilot-diff-exe
+          name: ParseBankers-Setup
+          path: installer/dist/ParseBankers-Setup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pilot-diff-raw-exe
           path: |
             backend/pilot-diff.exe
             backend/WebView2Loader.dll
