@@ -1,4 +1,4 @@
-name: Build Windows exe (spike)
+name: Build Windows exe
 
 on:
   push:
@@ -8,9 +8,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
@@ -18,10 +15,26 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Install mingw-w64 gcc (needed for CGO / go-duckdb)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install mingw-w64 gcc (needed for CGO / go-duckdb / webview)
         run: choco install mingw --version=13.2.0 -y
 
-      - name: Build
+      - name: Build frontend (static export)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Embed frontend into backend
+        run: |
+          New-Item -ItemType Directory -Force -Path backend/webui | Out-Null
+          Copy-Item -Path frontend/out/* -Destination backend/webui -Recurse -Force
+
+      - name: Build backend exe
+        working-directory: backend
         env:
           CGO_ENABLED: 1
           GOOS: windows
@@ -29,7 +42,14 @@ jobs:
         run: |
           go build -o pilot-diff.exe .
 
+      - name: Fetch WebView2Loader.dll (runtime-loaded by webview_go, not statically linked)
+        run: |
+          nuget install Microsoft.Web.WebView2 -Version 1.0.2592.51 -OutputDirectory webview2-pkg
+          Copy-Item -Path "webview2-pkg/Microsoft.Web.WebView2.*/build/native/x64/WebView2Loader.dll" -Destination backend/WebView2Loader.dll
+
       - uses: actions/upload-artifact@v4
         with:
           name: pilot-diff-exe
-          path: backend/pilot-diff.exe
+          path: |
+            backend/pilot-diff.exe
+            backend/WebView2Loader.dll
