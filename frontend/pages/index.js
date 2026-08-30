@@ -15,29 +15,26 @@ function fmtRp(n) {
 }
 
 // ---------- API helpers (dipakai bareng oleh view Simple & Pro) ----------
-async function apiCall(url, options, token) {
-  const res = await fetch(url, {
-    ...options,
-    headers: { ...(options?.headers || {}), "X-API-Token": token },
-  });
+async function apiCall(url, options) {
+  const res = await fetch(url, options);
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Terjadi kesalahan pada server");
   return data;
 }
-const apiCreateJob = (token) => apiCall(`${API_BASE}/jobs`, { method: "POST" }, token);
-const apiGetJob = (token, jobId) => apiCall(`${API_BASE}/jobs/${jobId}`, {}, token);
-const apiGetLog = (token, jobId) => apiCall(`${API_BASE}/jobs/${jobId}/log`, {}, token);
-const apiProcess = (token, jobId) => apiCall(`${API_BASE}/jobs/${jobId}/process`, { method: "POST" }, token);
-const apiStop = (token, jobId) => apiCall(`${API_BASE}/jobs/${jobId}/stop`, { method: "POST" }, token);
-const apiReset = (token, jobId) => apiCall(`${API_BASE}/jobs/${jobId}/reset`, { method: "POST" }, token);
-function apiLoadFile(token, jobId, role, file, opts) {
+const apiCreateJob = () => apiCall(`${API_BASE}/jobs`, { method: "POST" });
+const apiGetJob = (jobId) => apiCall(`${API_BASE}/jobs/${jobId}`);
+const apiGetLog = (jobId) => apiCall(`${API_BASE}/jobs/${jobId}/log`);
+const apiProcess = (jobId) => apiCall(`${API_BASE}/jobs/${jobId}/process`, { method: "POST" });
+const apiStop = (jobId) => apiCall(`${API_BASE}/jobs/${jobId}/stop`, { method: "POST" });
+const apiReset = (jobId) => apiCall(`${API_BASE}/jobs/${jobId}/reset`, { method: "POST" });
+function apiLoadFile(jobId, role, file, opts) {
   const form = new FormData();
   form.append("file", file);
   form.append("ignore_case", opts.ignoreCase ? "true" : "false");
   form.append("trim_data", opts.trimData ? "true" : "false");
   form.append("skip_header", opts.skipHeader ? "true" : "false");
   form.append("validate_data", opts.validateData ? "true" : "false");
-  return apiCall(`${API_BASE}/jobs/${jobId}/load/${role}`, { method: "POST", body: form }, token);
+  return apiCall(`${API_BASE}/jobs/${jobId}/load/${role}`, { method: "POST", body: form });
 }
 function IconAtm(props) {
   return (
@@ -55,14 +52,6 @@ function IconBank(props) {
       <path d="M3 10l9-6 9 6" />
       <path d="M5 10v9M9.5 10v9M14.5 10v9M19 10v9" />
       <path d="M3 19h18" />
-    </svg>
-  );
-}
-function IconLogout(props) {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <path d="M16 17l5-5-5-5M21 12H9" />
     </svg>
   );
 }
@@ -167,11 +156,6 @@ function PenyebabBadge({ value }) {
   );
 }
 export default function Home() {
-  const [token, setToken] = useState(null);
-  const [user, setUser] = useState("");
-  const [loginUser, setLoginUser] = useState("");
-  const [loginPass, setLoginPass] = useState("");
-  const [loginError, setLoginError] = useState("");
   const [viewMode, setViewMode] = useState("simple"); // "simple" | "pro"
 
   const atmRef = useRef(null);
@@ -201,20 +185,12 @@ export default function Home() {
   const [previewModal, setPreviewModal] = useState(null); // { title, lines }
 
   useEffect(() => {
-    const savedToken = localStorage.getItem("bni_token");
-    const savedUser = localStorage.getItem("bni_user");
-    if (savedToken) {
-      setToken(savedToken);
-      setUser(savedUser || "Agent");
-      fetchHistory(savedToken);
-    }
+    fetchHistory();
   }, []);
 
-  async function fetchHistory(authToken) {
+  async function fetchHistory() {
     try {
-      const res = await fetch(`${API_BASE}/history`, {
-        headers: { "X-API-Token": authToken || token },
-      });
+      const res = await fetch(`${API_BASE}/history`);
       if (res.ok) {
         const data = await res.json();
         setHistoryList((data.history || []).reverse());
@@ -227,10 +203,7 @@ export default function Home() {
   async function handleClearHistory() {
     if (!confirm("Apakah Anda yakin ingin menghapus seluruh riwayat komparasi?")) return;
     try {
-      const res = await fetch(`${API_BASE}/history`, {
-        method: "DELETE",
-        headers: { "X-API-Token": token },
-      });
+      const res = await fetch(`${API_BASE}/history`, { method: "DELETE" });
       if (res.ok) {
         setHistoryList([]);
         handleReset();
@@ -238,39 +211,6 @@ export default function Home() {
     } catch (e) {
       alert("Gagal menghapus riwayat log");
     }
-  }
-
-  async function handleLogin(e) {
-    e.preventDefault();
-    setLoginError("");
-    try {
-      const res = await fetch(`${API_BASE}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: loginUser, password: loginPass }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Login gagal");
-
-      localStorage.setItem("bni_token", data.token);
-      localStorage.setItem("bni_user", data.username);
-      setToken(data.token);
-      setUser(data.username);
-      setLoginPass("");
-      fetchHistory(data.token);
-    } catch (err) {
-      setLoginError(err.message);
-    }
-  }
-
-  function handleLogout() {
-    localStorage.clear();
-    setToken(null);
-    setUser("");
-    setLoginUser("");
-    setLoginPass("");
-    setHistoryList([]);
-    handleReset();
   }
   // ---------- Simple view: 1 tombol, orchestrate create->load->load->process di belakang layar ----------
   async function handleSubmit(e) {
@@ -286,12 +226,12 @@ export default function Home() {
     setStatus("uploading");
     try {
       const defaultOpts = { ignoreCase: false, trimData: true, skipHeader: false, validateData: true };
-      const created = await apiCreateJob(token);
+      const created = await apiCreateJob();
       const jobId = created.job_id;
-      await apiLoadFile(token, jobId, "ej", atmFile, defaultOpts);
-      await apiLoadFile(token, jobId, "rc", bniFile, defaultOpts);
+      await apiLoadFile(jobId, "ej", atmFile, defaultOpts);
+      await apiLoadFile(jobId, "rc", bniFile, defaultOpts);
       setStatus("processing");
-      await apiProcess(token, jobId);
+      await apiProcess(jobId);
       pollJob(jobId);
     } catch (err) {
       setErrorMsg(err.message);
@@ -302,7 +242,7 @@ export default function Home() {
   function pollJob(jobId) {
     const interval = setInterval(async () => {
       try {
-        const data = await apiGetJob(token, jobId);
+        const data = await apiGetJob(jobId);
         setJob(data);
         if (data.status === "done") {
           clearInterval(interval);
@@ -310,7 +250,7 @@ export default function Home() {
           // Tampilkan SEMUA kategori dulu begitu proses selesai - operator butuh
           // lihat gambaran lengkap sebelum nge-filter ke kategori tertentu.
           loadResults(jobId, "all", 1);
-          fetchHistory(token);
+          fetchHistory();
         } else if (data.status === "error") {
           clearInterval(interval);
           setStatus("error");
@@ -335,8 +275,7 @@ export default function Home() {
   async function loadResults(jobId, category, pageNum) {
     try {
       const res = await fetch(
-        `${API_BASE}/jobs/${jobId}/results?category=${category}&page=${pageNum}&page_size=50`,
-        { headers: { "X-API-Token": token } }
+        `${API_BASE}/jobs/${jobId}/results?category=${category}&page=${pageNum}&page_size=50`
       );
       const data = await res.json();
       if (!res.ok) {
@@ -385,11 +324,11 @@ export default function Home() {
     try {
       let jobId = proJobId;
       if (!jobId) {
-        const created = await apiCreateJob(token);
+        const created = await apiCreateJob();
         jobId = created.job_id;
         setProJobId(jobId);
       }
-      const data = await apiLoadFile(token, jobId, role, file, proOptions);
+      const data = await apiLoadFile(jobId, role, file, proOptions);
       if (role === "ej") {
         setProEjInfo({ name: file.name, count: data.total_record });
       } else {
@@ -410,7 +349,7 @@ export default function Home() {
     setProErrorMsg("");
     setStatus("processing");
     try {
-      await apiProcess(token, proJobId);
+      await apiProcess(proJobId);
       pollJob(proJobId);
     } catch (err) {
       setProErrorMsg(err.message);
@@ -421,7 +360,7 @@ export default function Home() {
   async function handleProStop() {
     if (!proJobId) return;
     try {
-      await apiStop(token, proJobId);
+      await apiStop(proJobId);
       setStatus("idle");
       setProErrorMsg("Proses dihentikan (STOP).");
     } catch (err) {
@@ -432,7 +371,7 @@ export default function Home() {
   async function handleProReset() {
     if (proJobId) {
       try {
-        await apiReset(token, proJobId);
+        await apiReset(proJobId);
       } catch (e) {
         // job mungkin sudah tidak ada, aman diabaikan
       }
@@ -447,7 +386,7 @@ export default function Home() {
       return;
     }
     try {
-      const data = await apiGetLog(token, proJobId);
+      const data = await apiGetLog(proJobId);
       setProLog(data.log || []);
     } catch (err) {
       setProLog([]);
@@ -477,151 +416,7 @@ export default function Home() {
   function exportUrl(format, category) {
     const jobId = viewMode === "pro" ? proJobId : job?.id;
     const cat = category && category !== "all" ? `&category=${category}` : "";
-    return `${API_BASE}/jobs/${jobId}/export?format=${format}${cat}&token=${encodeURIComponent(token)}`;
-  }
-  if (!token) {
-    return (
-      <div className="login-layout">
-        <div className="convergence" aria-hidden="true">
-          <svg viewBox="0 0 480 220" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
-            <path className="stream stream-a" d="M0,50 C160,50 190,110 240,110" />
-            <path className="stream stream-b" d="M480,170 C320,170 290,110 240,110" />
-            <circle className="node" cx="240" cy="110" r="4.5" />
-          </svg>
-        </div>
-
-        <div className="login-card">
-          <div className="login-header">
-            <div className="logo-badge">BNI</div>
-            <h2>CRM Cash Reconciliation System</h2>
-            <p>Automated Cash Reconciliation &amp; Exception Detection</p>
-          </div>
-          {loginError && <div className="alert-error">{loginError}</div>}
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label>Username</label>
-              <input
-                type="text"
-                placeholder="misal: Agent"
-                value={loginUser}
-                onChange={(e) => setLoginUser(e.target.value)}
-                autoComplete="username"
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Password</label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={loginPass}
-                onChange={(e) => setLoginPass(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
-            </div>
-            <button type="submit" className="btn-primary w-full">
-              Masuk ke Portal Secure
-            </button>
-          </form>
-          <p className="login-foot">Akses terbatas &bull; hanya untuk operator terdaftar</p>
-        </div>
-
-        <style jsx>{`
-          .login-layout {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            min-height: 100vh;
-            background: radial-gradient(ellipse 900px 500px at 50% -10%, #17233d 0%, #0a0e1a 60%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            overflow: hidden;
-            padding: 24px;
-          }
-          .convergence {
-            position: absolute;
-            top: 8%;
-            left: 50%;
-            transform: translateX(-50%);
-            width: min(560px, 90vw);
-            height: 180px;
-            opacity: 0.9;
-            pointer-events: none;
-          }
-          .stream {
-            fill: none;
-            stroke-width: 1.5;
-            stroke-dasharray: 4 6;
-          }
-          .stream-a { stroke: #5b9bff; }
-          .stream-b { stroke: #f5a524; }
-          .node {
-            fill: #f2711c;
-            filter: drop-shadow(0 0 6px rgba(242, 113, 28, 0.8));
-          }
-          @media (prefers-reduced-motion: no-preference) {
-            .stream { animation: flow 3.5s linear infinite; }
-            @keyframes flow { to { stroke-dashoffset: -40; } }
-          }
-          .login-card {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: #111a2e;
-            border: 1px solid #232f4a;
-            width: 100%;
-            max-width: 400px;
-            border-radius: 16px;
-            padding: 36px 32px 28px;
-            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.6);
-            position: relative;
-            z-index: 1;
-          }
-          .login-header { text-align: center; margin-bottom: 26px; }
-          .logo-badge {
-            background: linear-gradient(135deg, #f2711c, #d85c10);
-            color: white;
-            font-weight: 700;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            padding: 9px 16px;
-            border-radius: 9px;
-            font-size: 17px;
-            letter-spacing: 0.5px;
-            display: inline-block;
-            margin-bottom: 14px;
-            box-shadow: 0 8px 20px -6px rgba(242, 113, 28, 0.55);
-          }
-          .login-header h2 {
-            margin: 0 0 6px; font-size: 19px; font-weight: 700; color: #f2f5fb;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-          }
-          .login-header p { margin: 0; font-size: 12.5px; color: #7c88a4; }
-          .form-group { margin-bottom: 16px; }
-          .form-group label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px; color: #a6b1c9; }
-          .form-group input {
-            width: 100%; padding: 11px 13px; border: 1px solid #263252; border-radius: 8px; font-size: 14px;
-            box-sizing: border-box; background: #0d1425; color: #eef2fa; transition: border-color 0.15s, background 0.15s;
-          }
-          .form-group input::placeholder { color: #4a5674; }
-          .form-group input:focus {
-            outline: none; border-color: #f2711c; background: #0d1425;
-            box-shadow: 0 0 0 3px rgba(242, 113, 28, 0.15);
-          }
-          .alert-error {
-            background: rgba(251, 113, 133, 0.1); border: 1px solid rgba(251, 113, 133, 0.35); color: #fca5b3;
-            padding: 10px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; text-align: center;
-          }
-          .btn-primary {
-            background: linear-gradient(135deg, #f2711c, #d85c10);
-            color: white; border: none; padding: 12px 20px; border-radius: 9px;
-            font-weight: 600; font-size: 14.5px; cursor: pointer; transition: filter 0.15s, transform 0.1s;
-          }
-          .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
-          .btn-primary:active:not(:disabled) { transform: translateY(1px); }
-          .w-full { width: 100%; }
-          .login-foot { text-align: center; margin: 20px 0 0; font-size: 11.5px; color: #4a5674; }
-        `}</style>
-      </div>
-    );
+    return `${API_BASE}/jobs/${jobId}/export?format=${format}${cat}`;
   }
 
   const s = job?.summary || {};
@@ -642,14 +437,13 @@ export default function Home() {
               <button className={viewMode === "simple" ? "active" : ""} onClick={() => setViewMode("simple")}>Simple</button>
               <button className={viewMode === "pro" ? "active" : ""} onClick={() => setViewMode("pro")}>Pro</button>
             </div>
-            <span className="user-tag">Operator: <strong>{user}</strong></span>
             {status === "done" && (
               <button onClick={handleReset} className="btn-ghost">
                 <IconRefresh /> Komparasi Baru
               </button>
             )}
-            <button onClick={handleLogout} className="btn-logout">
-              <IconLogout /> Keluar
+            <button onClick={handleReset} className="btn-reset">
+              <IconRefresh /> Reset
             </button>
           </div>
         </div>
@@ -1104,14 +898,13 @@ export default function Home() {
               <a className="pro-btn pro-btn-excel" href={exportUrl("xlsx", "all")} target="_blank" rel="noreferrer" title="Export semua kategori, ditandai per baris"><IconExcel /> EXPORT EXCEL (SEMUA)</a>
               <a className="pro-btn" href={exportUrl("txt", "all")} target="_blank" rel="noreferrer" title="Export semua kategori, ditandai per baris"><IconFileText /> EXPORT TXT (SEMUA)</a>
               <button className="pro-btn" onClick={handleProViewLog}><IconList /> VIEW LOG</button>
-              <button className="pro-btn pro-btn-exit" onClick={handleLogout}><IconPower /> EXIT</button>
+              <button className="pro-btn pro-btn-exit" onClick={handleReset}><IconPower /> EXIT</button>
             </div>
           </>
         )}
 
         <div className="pro-statusbar">
           <span>Aplikasi Pengolahan 2 Data TXT Berbeda Format &bull; Web Edition</span>
-          <span>Operator: {user}</span>
         </div>
       </main>
       )}
@@ -1195,7 +988,6 @@ export default function Home() {
           font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.15s;
         }
         .view-toggle button.active { background: #f2711c; color: white; }
-        .user-tag { font-size: 13px; color: #a6b1c9; }
         .btn-ghost {
           display: inline-flex; align-items: center; gap: 6px;
           background: #16213a; color: #dbe2f0; border: 1px solid #263252;
@@ -1204,13 +996,13 @@ export default function Home() {
         }
         .btn-ghost:hover { background: #1c2942; }
         .btn-ghost-active { background: #1c2942; border-color: #37507e; }
-        .btn-logout {
+        .btn-reset {
           display: inline-flex; align-items: center; gap: 6px;
           background: rgba(251, 113, 133, 0.12); color: #fca5b3; border: 1px solid rgba(251, 113, 133, 0.3);
           padding: 7px 13px; border-radius: 7px; cursor: pointer; font-weight: 600; font-size: 12.5px;
           transition: background 0.15s;
         }
-        .btn-logout:hover { background: rgba(251, 113, 133, 0.2); }
+        .btn-reset:hover { background: rgba(251, 113, 133, 0.2); }
         .container { max-width: 1220px; margin: 32px auto; padding: 0 24px 60px; }
         .alert-error {
           background: rgba(251, 113, 133, 0.1); border: 1px solid rgba(251, 113, 133, 0.3); color: #fca5b3;
