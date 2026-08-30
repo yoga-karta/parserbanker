@@ -19,9 +19,6 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 UninstallDisplayIcon={app}\{#AppExeName}
 
-[Languages]
-Name: "indonesian"; MessagesFile: "compiler:Languages\Indonesian.isl"
-
 [Files]
 Source: "..\backend\pilot-diff.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\backend\WebView2Loader.dll"; DestDir: "{app}"; Flags: ignoreversion
