@@ -107,7 +107,12 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 			current.Status = "SUCCESS"
 		} else if strings.Contains(line, "TRANSACTION FAILED") || strings.Contains(line, "TRANSACTION DECLINED") {
 			current.Status = "FAILED"
-		} else if strings.Contains(strings.ToUpper(line), "ROLLBACK") {
+		} else if strings.Contains(strings.ToUpper(line), "ROLLBACK OK") {
+			// Indikator harus persis "Rollback OK" (bukan cuma kata "Rollback" di
+			// baris manapun, mis. "----- Rollback Notes ----") - sebuah transaksi
+			// kadang punya 2 baris "Rollback Notes" tapi cuma yang beneran
+			// ke-rollback yang diikuti "Rollback OK"; baris kedua cuma housekeeping
+			// penutupan transaksi dan bukan rollback sungguhan.
 			current.Status = "ROLLBACK"
 		}
 	}

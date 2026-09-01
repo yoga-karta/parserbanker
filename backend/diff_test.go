@@ -49,4 +49,7 @@ func TestRunDiff_SelisihKurangRule(t *testing.T) {
 	if s.TidakDitemukan != 3 {
 		t.Errorf("TidakDitemukan = %d, want 3 (rollback-nominal-beda + normal-nominal-beda + tanpa pasangan)", s.TidakDitemukan)
 	}
+	if s.SelisihNominalKurang != 200000 {
+		t.Errorf("SelisihNominalKurang = %d, want 200000 (nominal asli baris selisih_kurang seq 2, bukan selisih EJ-Cash yang selalu 0)", s.SelisihNominalKurang)
+	}
 }

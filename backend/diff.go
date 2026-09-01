@@ -120,6 +120,9 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 		// lebih kecil dari EJ". Kategori "Selisih Lebih" dihapus total. Baris
 		// mana pun yang nominalnya beda (rollback atau bukan) jatuh ke
 		// 'tidak_ditemukan' - dianggap butuh review manual, bukan match otomatis.
+		// ej_status = 'ROLLBACK' cuma di-set kalau EJ eksplisit nyebut "Rollback
+		// OK" (lihat parser.go) - bukan sekadar kata "Rollback" muncul di baris
+		// manapun.
 		`CREATE TABLE diff_result AS
 			SELECT
 				COALESCE(e.rec_num, c.rec_num, '') AS rec_num,
@@ -174,7 +177,7 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 			(SELECT COUNT(*) FROM diff_result WHERE category = 'data_invalid'),
 			(SELECT COALESCE(SUM(nominal), 0) FROM ej),
 			(SELECT COALESCE(SUM(nominal), 0) FROM rc),
-			(SELECT COALESCE(SUM(nominal_ej - nominal_cash), 0) FROM diff_result WHERE category = 'selisih_kurang')
+			(SELECT COALESCE(SUM(nominal_ej), 0) FROM diff_result WHERE category = 'selisih_kurang')
 	`)
 	if err := row.Scan(&s.TotalEJ, &s.TotalCash, &s.Match, &s.SelisihKurang, &s.TidakDitemukan, &s.DataInvalid,
 		&s.NominalEJ, &s.NominalCash, &s.SelisihNominalKurang); err != nil {
@@ -207,7 +210,7 @@ func FetchSummary(resultDBPath string) (Summary, error) {
 			(SELECT COUNT(*) FROM diff_result WHERE category = 'data_invalid'),
 			(SELECT COALESCE(SUM(nominal), 0) FROM ej),
 			(SELECT COALESCE(SUM(nominal), 0) FROM rc),
-			(SELECT COALESCE(SUM(nominal_ej - nominal_cash), 0) FROM diff_result WHERE category = 'selisih_kurang')
+			(SELECT COALESCE(SUM(nominal_ej), 0) FROM diff_result WHERE category = 'selisih_kurang')
 	`)
 	err = row.Scan(&s.TotalEJ, &s.TotalCash, &s.Match, &s.SelisihKurang, &s.TidakDitemukan, &s.DataInvalid,
 		&s.NominalEJ, &s.NominalCash, &s.SelisihNominalKurang)

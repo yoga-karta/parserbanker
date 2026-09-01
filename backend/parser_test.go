@@ -104,3 +104,60 @@ func TestParseATMLogToCSV_RollbackAfterEndNotAttributedToPrevTransaction(t *test
 		t.Errorf("seq 0000 status = %q, want SUCCESS (Rollback Notes sesudah END-nya bukan miliknya)", got)
 	}
 }
+
+// TestParseATMLogToCSV_RollbackNotesWithoutOKIsNotRollback menguji keputusan
+// bisnis (revisi 1 Sep 2026): indikator ROLLBACK harus persis "Rollback OK".
+// Kejadian nyata di EJ.TXT: satu transaksi kadang punya 2 baris "----- Rollback
+// Notes ----", tapi cuma rollback yang PERTAMA yang beneran diikuti "Rollback
+// OK" - baris "Rollback Notes" kedua cuma housekeeping penutupan transaksi
+// (mis. abis notes yang ditolak diambil dari output tray) dan TIDAK diikuti
+// "OK". Transaksi kayak gini tetap harus ROLLBACK (karena OK yang pertama ada),
+// tapi transaksi yang "Rollback Notes"-nya nggak PERNAH diikuti "OK" sama
+// sekali harus tetap status aslinya (SUCCESS), bukan ROLLBACK.
+func TestParseATMLogToCSV_RollbackNotesWithoutOKIsNotRollback(t *testing.T) {
+	raw := "09/07/2026 16:46:19 TRANSACTION START\n" +
+		"09/07/2026 16:46:19 CARD NUMBER 194634******6969\n" +
+		"09/07/2026 16:47:03 Amount : 2400000\n" +
+		"09/07/2026 16:47:05 TRANSACTION REPLIED\n" +
+		"09/07/2026 16:47:05 TRAN SEQ NR [0694]\n" +
+		"09/07/2026 16:47:06 ----- Rollback Notes ----\n" + // rollback #1, beneran
+		"09/07/2026 16:47:16   Rollback OK\n" +
+		"09/07/2026 16:47:24   Refused Notes in Output Tray TAKEN\n" +
+		"09/07/2026 16:47:25 ----- Rollback Notes ----\n" + // housekeeping, TANPA OK
+		"09/07/2026 16:47:28 TRANSACTION END\n" +
+		"09/07/2026 16:48:01 TRANSACTION START\n" +
+		"09/07/2026 16:48:01 CARD NUMBER 111111\n" +
+		"09/07/2026 16:48:10 Amount : 100000\n" +
+		"09/07/2026 16:48:15 TRANSACTION REPLIED\n" +
+		"09/07/2026 16:48:15 TRAN SEQ NR [0695]\n" +
+		"09/07/2026 16:48:16 ----- Rollback Notes ----\n" + // rollback disebut tapi NGGAK PERNAH ada OK
+		"09/07/2026 16:48:20 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.Open(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := rows[1][len(rows[1])-1]; got != "ROLLBACK" {
+		t.Errorf("seq 0694 status = %q, want ROLLBACK (ada Rollback OK beneran di blok ini)", got)
+	}
+	if got := rows[2][len(rows[2])-1]; got != "SUCCESS" {
+		t.Errorf("seq 0695 status = %q, want SUCCESS (Rollback Notes tanpa OK bukan rollback beneran)", got)
+	}
+}
