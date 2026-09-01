@@ -615,10 +615,6 @@ export default function Home() {
                 <span className="nominal-label">Selisih Nominal (Kurang)</span>
                 <span className="nominal-value">{fmtRp(s.selisih_nominal_kurang)}</span>
               </div>
-              <div className="nominal-card accent-blue">
-                <span className="nominal-label">Selisih Nominal (Lebih)</span>
-                <span className="nominal-value">{fmtRp(s.selisih_nominal_lebih)}</span>
-              </div>
             </div>
 
             <div className="card table-card">
@@ -684,7 +680,7 @@ export default function Home() {
                   <tbody>
                     {results.results && results.results.length > 0 ? (
                       results.results.map((r, i) => (
-                        <tr key={r.rec_num || i}>
+                        <tr key={`${r.rec_num}-${i}`}>
                           <td>{(page - 1) * 50 + i + 1}</td>
                           <td>{r.tanggal || "—"}</td>
                           <td>{r.terminal || "—"}</td>
@@ -830,7 +826,7 @@ export default function Home() {
                   <tbody>
                     {results.results && results.results.length > 0 ? (
                       results.results.map((r, i) => (
-                        <tr key={r.rec_num || i} className={`pro-row-${r.category}`}>
+                        <tr key={`${r.rec_num}-${i}`} className={`pro-row-${r.category}`}>
                           <td>{(page - 1) * 50 + i + 1}</td>
                           <td>{r.tanggal || "—"}</td>
                           <td>{r.terminal || "—"}</td>
@@ -872,7 +868,6 @@ export default function Home() {
                 <div className="pro-nominal-row">
                   <div><span>Total Nominal EJ</span><strong>{fmtRp(s.nominal_ej)}</strong></div>
                   <div><span>Total Nominal Cash</span><strong>{fmtRp(s.nominal_cash)}</strong></div>
-                  <div><span>Selisih Nominal (Lebih)</span><strong className="pro-text-blue">{fmtRp(s.selisih_nominal_lebih)}</strong></div>
                   <div><span>Selisih Nominal (Kurang)</span><strong className="pro-text-red">{fmtRp(s.selisih_nominal_kurang)}</strong></div>
                 </div>
               </div>

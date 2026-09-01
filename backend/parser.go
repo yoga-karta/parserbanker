@@ -51,8 +51,18 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 	var current ATMLogRecord
 	count := 0
 
+	// File EJ mentah kadang punya section yang ke-duplikat persis (misal gara-gara
+	// export yang overlap tanggal) - blok dengan timestamp+seq+amount identik
+	// dianggap transaksi fisik yang sama, cuma dihitung sekali.
+	seen := map[string]bool{}
+
 	flush := func() {
 		if current.SeqNr != "" && current.Amount != "" {
+			dedupKey := current.Timestamp + "|" + current.SeqNr + "|" + current.Amount
+			if seen[dedupKey] {
+				return
+			}
+			seen[dedupKey] = true
 			writer.Write([]string{
 				current.Timestamp, current.CardNum, current.TerminalID, current.Amount, current.SeqNr, current.Status,
 			})
