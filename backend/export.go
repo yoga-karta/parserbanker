@@ -12,7 +12,7 @@ import (
 // terhadap daftar ini dulu sebelum ditempel ke SQL - "" atau "all" berarti
 // tanpa filter (export semua).
 var validExportCategory = map[string]bool{
-	"match": true, "selisih_lebih": true, "selisih_kurang": true,
+	"match": true, "selisih_kurang": true,
 	"tidak_ditemukan": true, "data_invalid": true,
 }
 
@@ -46,7 +46,6 @@ func ExportTXT(resultDBPath, outputPath, category string) error {
 
 var categoryFillColor = map[string]string{
 	"match":           "E6F9F0",
-	"selisih_lebih":   "E6F0FF",
 	"selisih_kurang":  "FDEAEA",
 	"tidak_ditemukan": "F3EAFB",
 	"data_invalid":    "FEFBE6",

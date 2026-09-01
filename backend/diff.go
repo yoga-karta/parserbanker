@@ -21,13 +21,11 @@ type Summary struct {
 	TotalEJ              int   `json:"total_ej"`
 	TotalCash            int   `json:"total_cash"`
 	Match                int   `json:"match"`
-	SelisihLebih         int   `json:"selisih_lebih"`
 	SelisihKurang        int   `json:"selisih_kurang"`
 	TidakDitemukan       int   `json:"tidak_ditemukan"`
 	DataInvalid          int   `json:"data_invalid"`
 	NominalEJ            int64 `json:"nominal_ej"`
 	NominalCash          int64 `json:"nominal_cash"`
-	SelisihNominalLebih  int64 `json:"selisih_nominal_lebih"`
 	SelisihNominalKurang int64 `json:"selisih_nominal_kurang"`
 }
 
@@ -115,8 +113,13 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 
 		// Kategori "data_invalid" ditaruh SEBELUM perbandingan nominal, jadi baris
 		// yang nominal-nya gagal di-cast (NULL) berhenti di sini dan tidak pernah
-		// jatuh ke ELSE 'selisih_kurang' - itu penyebab bug double-count sebelumnya
-		// (baris yang sama kehitung sebagai selisih_kurang DAN data_invalid).
+		// jatuh ke kondisi lain.
+		//
+		// "Selisih Kurang" (per keputusan 1 Sep 2026) HANYA berlaku buat baris
+		// ROLLBACK yang nominal EJ dan Cash-nya SAMA - bukan lagi generic "cash
+		// lebih kecil dari EJ". Kategori "Selisih Lebih" dihapus total. Baris
+		// mana pun yang nominalnya beda (rollback atau bukan) jatuh ke
+		// 'tidak_ditemukan' - dianggap butuh review manual, bukan match otomatis.
 		`CREATE TABLE diff_result AS
 			SELECT
 				COALESCE(e.rec_num, c.rec_num, '') AS rec_num,
@@ -128,33 +131,25 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 				c.nominal AS nominal_cash,
 				COALESCE(e.ej_status, 'NOT FOUND') AS ej_status,
 				COALESCE(c.dc_flag, 'NOT FOUND') AS cash_status,
-				-- Urutan CASE penting: tidak_ditemukan/data_invalid dicek DULUAN
-				-- sebelum status ROLLBACK - baris yang gak punya pasangan RC sama
-				-- sekali (c.rec_num IS NULL, gak ada nominal buat dibandingkan)
-				-- harus tetap 'tidak_ditemukan', BUKAN otomatis 'selisih_kurang'
-				-- cuma gara-gara ej_status='ROLLBACK'. "Selisih Kurang" cuma
-				-- masuk akal kalau ada dua nominal beneran buat dibandingkan.
 				CASE
 					WHEN e.rec_num IS NULL OR c.rec_num IS NULL THEN 'tidak_ditemukan'
 					WHEN e.nominal IS NULL OR c.nominal IS NULL THEN 'data_invalid'
-					WHEN e.ej_status = 'ROLLBACK' THEN 'selisih_kurang'
+					WHEN c.nominal = e.nominal AND e.ej_status = 'ROLLBACK' THEN 'selisih_kurang'
 					WHEN c.nominal = e.nominal THEN 'match'
-					WHEN c.nominal > e.nominal THEN 'selisih_lebih'
-					ELSE 'selisih_kurang'
+					ELSE 'tidak_ditemukan'
 				END AS category,
 				CASE
 					WHEN e.rec_num IS NULL THEN 'Tidak ada di EJ'
 					WHEN c.rec_num IS NULL THEN 'Tidak ada di RC'
 					WHEN e.nominal IS NULL OR c.nominal IS NULL THEN 'Nominal tidak terbaca (data rusak/kosong)'
-					WHEN e.ej_status = 'ROLLBACK' THEN 'Transaksi rollback di EJ - dana kemungkinan sudah keluar'
-					WHEN c.nominal > e.nominal THEN 'Nominal RC lebih besar dari EJ'
-					WHEN c.nominal < e.nominal THEN 'Nominal RC lebih kecil dari EJ'
+					WHEN c.nominal = e.nominal AND e.ej_status = 'ROLLBACK' THEN 'Transaksi rollback di EJ - dana kemungkinan sudah keluar'
+					WHEN c.nominal <> e.nominal THEN 'Nominal EJ dan Cash tidak sama'
 					ELSE '-'
 				END AS keterangan,
 				CASE
 					WHEN e.rec_num IS NULL OR c.rec_num IS NULL THEN NULL
 					WHEN e.nominal IS NULL OR c.nominal IS NULL THEN NULL
-					WHEN e.ej_status = 'ROLLBACK' THEN 'Nasabah Diuntungkan'
+					WHEN c.nominal = e.nominal AND e.ej_status = 'ROLLBACK' THEN 'Nasabah Diuntungkan'
 					ELSE NULL
 				END AS kemungkinan_penyebab
 			FROM ej e FULL OUTER JOIN rc c ON e.rec_num = c.rec_num`,
@@ -174,17 +169,15 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 		SELECT
 			(SELECT COUNT(*) FROM ej), (SELECT COUNT(*) FROM rc),
 			(SELECT COUNT(*) FROM diff_result WHERE category = 'match'),
-			(SELECT COUNT(*) FROM diff_result WHERE category = 'selisih_lebih'),
 			(SELECT COUNT(*) FROM diff_result WHERE category = 'selisih_kurang'),
 			(SELECT COUNT(*) FROM diff_result WHERE category = 'tidak_ditemukan'),
 			(SELECT COUNT(*) FROM diff_result WHERE category = 'data_invalid'),
 			(SELECT COALESCE(SUM(nominal), 0) FROM ej),
 			(SELECT COALESCE(SUM(nominal), 0) FROM rc),
-			(SELECT COALESCE(SUM(nominal_cash - nominal_ej), 0) FROM diff_result WHERE category = 'selisih_lebih'),
 			(SELECT COALESCE(SUM(nominal_ej - nominal_cash), 0) FROM diff_result WHERE category = 'selisih_kurang')
 	`)
-	if err := row.Scan(&s.TotalEJ, &s.TotalCash, &s.Match, &s.SelisihLebih, &s.SelisihKurang, &s.TidakDitemukan, &s.DataInvalid,
-		&s.NominalEJ, &s.NominalCash, &s.SelisihNominalLebih, &s.SelisihNominalKurang); err != nil {
+	if err := row.Scan(&s.TotalEJ, &s.TotalCash, &s.Match, &s.SelisihKurang, &s.TidakDitemukan, &s.DataInvalid,
+		&s.NominalEJ, &s.NominalCash, &s.SelisihNominalKurang); err != nil {
 		if ctx.Err() != nil {
 			return Summary{}, fmt.Errorf("proses dibatalkan (STOP)")
 		}

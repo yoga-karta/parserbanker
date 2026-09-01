@@ -127,7 +127,7 @@ func handleProcess(store *JobStore) fiber.Handler {
 			_ = AppendHistory(HistoryEntry{
 				JobID: id, Username: username, Timestamp: time.Now(), Status: "done",
 				Counts: map[string]int{
-					"match": summary.Match, "selisih_lebih": summary.SelisihLebih,
+					"match":          summary.Match,
 					"selisih_kurang": summary.SelisihKurang, "tidak_ditemukan": summary.TidakDitemukan,
 				},
 			})

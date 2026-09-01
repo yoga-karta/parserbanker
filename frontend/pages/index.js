@@ -2,9 +2,8 @@ import { useState, useRef, useEffect } from "react";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api";
 
 const CATEGORIES = [
-  { key: "selisih_kurang", label: "Selisih Kurang", color: "#fb7185", bg: "#2a151b", border: "#4a2430", legend: "Nominal Cash lebih kecil dari EJ" },
-  { key: "selisih_lebih", label: "Selisih Lebih", color: "#5b9bff", bg: "#131f33", border: "#233a5c", legend: "Nominal Cash lebih besar dari EJ" },
-  { key: "tidak_ditemukan", label: "Tidak Ditemukan", color: "#a78bfa", bg: "#201a33", border: "#3a2f5c", legend: "Ada di salah satu file, tidak ditemukan di file lainnya" },
+  { key: "selisih_kurang", label: "Selisih Kurang", color: "#fb7185", bg: "#2a151b", border: "#4a2430", legend: "Rollback dengan Nominal EJ dan Cash sama" },
+  { key: "tidak_ditemukan", label: "Tidak Ditemukan", color: "#a78bfa", bg: "#201a33", border: "#3a2f5c", legend: "Ada di salah satu file tapi tidak ditemukan pasangannya, atau nominal EJ dan Cash tidak sama" },
   { key: "match", label: "Match / Klop", color: "#34d399", bg: "#0f2a22", border: "#1c4a3a", legend: "Data EJ dan Cash sesuai" },
   { key: "data_invalid", label: "Data Rusak", color: "#facc15", bg: "#2a2510", border: "#4a4020", legend: "Nominal EJ atau Cash tidak terbaca (data rusak/kosong)" },
 ];
@@ -420,7 +419,7 @@ export default function Home() {
   }
 
   const s = job?.summary || {};
-  const allCount = (s.match || 0) + (s.selisih_lebih || 0) + (s.selisih_kurang || 0) + (s.tidak_ditemukan || 0) + (s.data_invalid || 0);
+  const allCount = (s.match || 0) + (s.selisih_kurang || 0) + (s.tidak_ditemukan || 0) + (s.data_invalid || 0);
   return (
     <div className={viewMode === "pro" ? "layout pro-mode" : "layout"}>
       <header className="header">
@@ -470,7 +469,7 @@ export default function Home() {
             </div>
             <div className="history-list">
               {historyList.map((h, i) => {
-                const perluCek = (h.counts?.selisih_lebih || 0) + (h.counts?.selisih_kurang || 0) + (h.counts?.tidak_ditemukan || 0);
+                const perluCek = (h.counts?.selisih_kurang || 0) + (h.counts?.tidak_ditemukan || 0);
                 return (
                   <div
                     key={h.job_id}
@@ -799,7 +798,7 @@ export default function Home() {
                   >
                     Semua ({allCount.toLocaleString("id-ID")})
                   </button>
-                  {CATEGORIES.filter((c) => c.key !== "selisih_lebih").map((c) => (
+                  {CATEGORIES.map((c) => (
                     <button
                       key={c.key}
                       className={`pro-filter-btn ${activeCategory === c.key ? "pro-filter-active" : ""}`}
@@ -881,7 +880,7 @@ export default function Home() {
               <div className="pro-panel">
                 <h2 className="pro-panel-title">DETAIL RESULT</h2>
                 <div className="pro-legend">
-                  {CATEGORIES.filter((c) => c.key !== "selisih_lebih").map((c) => (
+                  {CATEGORIES.map((c) => (
                     <div key={c.key} className="pro-legend-row">
                       <span className="pro-legend-dot" style={{ background: c.color }} />
                       <strong>{c.label.toUpperCase()}</strong>
@@ -1196,7 +1195,6 @@ export default function Home() {
         .pro-table td { padding: 8px 12px; border-bottom: 1px solid #eef1f6; color: #334155; }
         .pro-th-recnum { border-left: 2px solid #ef4444; border-right: 2px solid #ef4444; }
         .pro-row-match td { background: #ecfdf5; }
-        .pro-row-selisih_lebih td { background: #eff6ff; }
         .pro-row-selisih_kurang td { background: #fef2f2; }
         .pro-row-tidak_ditemukan td { background: #f5f3ff; }
         .pro-row-data_invalid td { background: #fefce8; }
@@ -1205,7 +1203,6 @@ export default function Home() {
         .pro-text-blue { color: #2563eb; }
         .pro-badge { font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
         .pro-badge-match { background: #16a34a; color: white; }
-        .pro-badge-selisih_lebih { background: #2563eb; color: white; }
         .pro-badge-selisih_kurang { background: #dc2626; color: white; }
         .pro-badge-tidak_ditemukan { background: #7c3aed; color: white; }
         .pro-badge-data_invalid { background: #ca8a04; color: white; }
