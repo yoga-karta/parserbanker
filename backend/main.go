@@ -69,6 +69,7 @@ func main() {
 	defer w.Destroy()
 	w.SetTitle("Parse Bankers - Reconciliation Portal")
 	w.SetSize(1280, 800, webview.HintNone)
+	setWindowIconFromExe(w.Window())
 	w.Navigate("http://" + addr + "/")
 	w.Run()
 }
