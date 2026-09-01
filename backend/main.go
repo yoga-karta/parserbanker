@@ -49,6 +49,10 @@ func main() {
 	api.Get("/history", handleHistory)
 	api.Delete("/history", handleClearHistory)
 
+	api.Get("/version", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"version": AppVersion})
+	})
+
 	// Frontend static (hasil next export, di-embed via embed.go) - didaftar
 	// belakangan supaya /api/* di atas selalu menang duluan.
 	webRoot, err := fs.Sub(webUI, "webui")

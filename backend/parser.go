@@ -83,6 +83,18 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 			continue
 		}
 
+		if strings.Contains(line, "TRANSACTION END") {
+			// Flush & reset di sini, bukan cuma di START berikutnya - baris mesin
+			// (mis. "Rollback Notes"/"Rollback OK" pas ATM narik balik uang yang
+			// nggak diambil nasabah) kadang muncul SETELAH END tapi SEBELUM START
+			// transaksi berikutnya. Kalau current nggak direset di sini, baris itu
+			// kebaca sebagai bagian transaksi yang barusan kelar dan salah nge-mark
+			// transaksi itu ROLLBACK padahal blok transaksinya sendiri bersih.
+			flush()
+			current = ATMLogRecord{}
+			continue
+		}
+
 		if match := reCard.FindStringSubmatch(line); len(match) > 1 {
 			current.CardNum = match[1]
 		} else if match := reTerminal.FindStringSubmatch(line); len(match) > 1 {

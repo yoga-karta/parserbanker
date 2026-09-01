@@ -32,6 +32,17 @@ func appDataDir() string {
 	return filepath.Join(dir, "pilot-diff")
 }
 
+// resultsRoot menyimpan hasil diff tiap job (result.duckdb) secara persisten,
+// beda dari tmpRoot (OS temp) yang cuma buat file staging EJ/RC mentah dan
+// boleh hilang kapan aja. Ini yang bikin baris "Riwayat" lama masih bisa
+// dibuka lagi walau app-nya udah di-restart.
+// ponytail: nggak ada retention/cleanup, folder ini numpuk terus. Tambah
+// pruning (mis. hapus job lebih tua dari history.jsonl yang disimpan) kalau
+// ukurannya udah kerasa di disk.
+func resultsRoot() string {
+	return filepath.Join(appDataDir(), "results")
+}
+
 func AppendHistory(entry HistoryEntry) error {
 	historyMu.Lock()
 	defer historyMu.Unlock()

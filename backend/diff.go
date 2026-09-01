@@ -187,6 +187,33 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 	return s, nil
 }
 
+// FetchSummary menghitung ulang Summary dari result DB yang udah jadi (tabel
+// ej/rc/diff_result udah ada) - dipakai buat job lama yang datanya udah nggak
+// ada di memori (app baru di-restart) tapi file hasilnya masih ada di disk.
+func FetchSummary(resultDBPath string) (Summary, error) {
+	db, err := sql.Open("duckdb", resultDBPath)
+	if err != nil {
+		return Summary{}, err
+	}
+	defer db.Close()
+
+	var s Summary
+	row := db.QueryRow(`
+		SELECT
+			(SELECT COUNT(*) FROM ej), (SELECT COUNT(*) FROM rc),
+			(SELECT COUNT(*) FROM diff_result WHERE category = 'match'),
+			(SELECT COUNT(*) FROM diff_result WHERE category = 'selisih_kurang'),
+			(SELECT COUNT(*) FROM diff_result WHERE category = 'tidak_ditemukan'),
+			(SELECT COUNT(*) FROM diff_result WHERE category = 'data_invalid'),
+			(SELECT COALESCE(SUM(nominal), 0) FROM ej),
+			(SELECT COALESCE(SUM(nominal), 0) FROM rc),
+			(SELECT COALESCE(SUM(nominal_ej - nominal_cash), 0) FROM diff_result WHERE category = 'selisih_kurang')
+	`)
+	err = row.Scan(&s.TotalEJ, &s.TotalCash, &s.Match, &s.SelisihKurang, &s.TidakDitemukan, &s.DataInvalid,
+		&s.NominalEJ, &s.NominalCash, &s.SelisihNominalKurang)
+	return s, err
+}
+
 type ResultRow struct {
 	RecNum              string  `json:"rec_num"`
 	Tanggal             string  `json:"tanggal"`

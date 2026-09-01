@@ -7,7 +7,7 @@
 
 [Setup]
 AppName={#AppName}
-AppVersion=1.0.0
+AppVersion=1.1.0
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes

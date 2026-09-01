@@ -176,7 +176,12 @@ function SidePanel({ panel, onClose, historyList, activeJobId, onSelectHistory, 
     <div className="panel-overlay" onClick={onClose}>
       <aside className="side-panel" onClick={(e) => e.stopPropagation()}>
         <div className="side-panel-head">
-          <h3>{isHistory ? "Riwayat Rekonsiliasi" : "Detail Transaksi"}</h3>
+          <div className="side-panel-head-title">
+            <h3>{isHistory ? "Riwayat Rekonsiliasi" : "Detail Transaksi"}</h3>
+            {isHistory && historyList.length > 0 && (
+              <button className="btn-link-danger" onClick={onClearHistory}><IconTrash /> Hapus Semua</button>
+            )}
+          </div>
           <button className="panel-close" onClick={onClose}>×</button>
         </div>
 
@@ -185,34 +190,31 @@ function SidePanel({ panel, onClose, historyList, activeJobId, onSelectHistory, 
             {historyList.length === 0 ? (
               <p className="dim-text">Belum ada riwayat.</p>
             ) : (
-              <>
-                <div className="history-list-v">
-                  {historyList.map((h, i) => {
-                    const perluCek = (h.counts?.selisih_kurang || 0) + (h.counts?.tidak_ditemukan || 0);
-                    return (
-                      <div
-                        key={h.job_id}
-                        onClick={() => onSelectHistory(h)}
-                        className={`history-row ${activeJobId === h.job_id ? "history-row-active" : ""}`}
-                      >
-                        <div className="history-row-top">
-                          <strong>Pencocokan #{historyList.length - i}</strong>
-                          <span>{new Date(h.timestamp).toLocaleString("id-ID")}</span>
-                        </div>
-                        {h.status === "done" ? (
-                          <div className="history-row-stats">
-                            <span className="pill pill-green">Match {h.counts?.match || 0}</span>
-                            <span className="pill pill-red">Perlu Cek {perluCek}</span>
-                          </div>
-                        ) : (
-                          <span className="pill pill-red">Error / Gagal</span>
-                        )}
+              <div className="history-list-v">
+                {historyList.map((h, i) => {
+                  const perluCek = (h.counts?.selisih_kurang || 0) + (h.counts?.tidak_ditemukan || 0);
+                  return (
+                    <div
+                      key={h.job_id}
+                      onClick={() => onSelectHistory(h)}
+                      className={`history-row ${activeJobId === h.job_id ? "history-row-active" : ""}`}
+                    >
+                      <div className="history-row-top">
+                        <strong>Pencocokan #{historyList.length - i}</strong>
+                        <span>{new Date(h.timestamp).toLocaleString("id-ID")}</span>
                       </div>
-                    );
-                  })}
-                </div>
-                <button className="btn-link-danger" onClick={onClearHistory}><IconTrash /> Hapus Semua Riwayat</button>
-              </>
+                      {h.status === "done" ? (
+                        <div className="history-row-stats">
+                          <span className="pill pill-green">Match {h.counts?.match || 0}</span>
+                          <span className="pill pill-red">Perlu Cek {perluCek}</span>
+                        </div>
+                      ) : (
+                        <span className="pill pill-red">Error / Gagal</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         ) : (
@@ -263,6 +265,7 @@ export default function Home() {
   const [errorMsg, setErrorMsg] = useState("");
   const [historyList, setHistoryList] = useState([]);
   const [panel, setPanel] = useState(null); // null | {type:"history"} | {type:"row", data}
+  const [appVersion, setAppVersion] = useState("");
 
   const ejRef = useRef(null);
   const rcRef = useRef(null);
@@ -278,6 +281,10 @@ export default function Home() {
 
   useEffect(() => {
     fetchHistory();
+    fetch(`${API_BASE}/version`)
+      .then((r) => r.json())
+      .then((d) => setAppVersion(d.version || ""))
+      .catch(() => {});
   }, []);
 
   async function fetchHistory() {
@@ -331,11 +338,16 @@ export default function Home() {
   async function handleSelectHistory(item) {
     if (item.status !== "done") return;
     setErrorMsg("");
-    setJobId(item.job_id);
-    setJob({ id: item.job_id, status: item.status, summary: item.summary || {} });
-    setStatus("done");
-    setPanel(null);
-    await loadResults(item.job_id, "all", 1);
+    try {
+      const data = await apiGetJob(item.job_id);
+      setJobId(item.job_id);
+      setJob(data);
+      setStatus("done");
+      setPanel(null);
+      await loadResults(item.job_id, "all", 1);
+    } catch (err) {
+      setErrorMsg("Riwayat ini sudah tidak bisa dibuka (hasilnya sudah terhapus dari disk).");
+    }
   }
 
   async function loadResults(id, category, pageNum) {
@@ -493,7 +505,7 @@ export default function Home() {
           <div className="brand">
             <img src="/bni-logo.png" alt="BNI" className="logo-badge" />
             <div>
-              <h1>Reconciliation Portal</h1>
+              <h1>Reconciliation Portal{appVersion && <span className="version-tag">v{appVersion}</span>}</h1>
               <p>Automated Transaction Matching &bull; ATM vs Core Banking</p>
             </div>
           </div>
@@ -735,6 +747,7 @@ export default function Home() {
         .logo-badge { height: 36px; width: auto; display: block; }
         .brand h1 { margin: 0; font-size: 17px; font-weight: 700; color: #0d1425; }
         .brand p { margin: 2px 0 0; font-size: 12.5px; color: #8188a1; }
+        .version-tag { margin-left: 8px; font-size: 10.5px; font-weight: 500; color: #8188a1; vertical-align: middle; }
         .topbar-actions { display: flex; align-items: center; gap: 10px; }
         .count-pill {
           background: #f2711c; color: white; font-size: 10.5px; font-weight: 700;
@@ -905,6 +918,7 @@ export default function Home() {
         }
         @keyframes slideIn { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .side-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .side-panel-head-title { display: flex; align-items: center; gap: 14px; }
         .side-panel-head h3 { margin: 0; font-size: 16px; }
         .panel-close { background: none; border: none; color: #8b93ab; font-size: 22px; cursor: pointer; line-height: 1; }
         .panel-close:hover { color: #eef2fa; }

@@ -13,6 +13,21 @@ import (
 
 var tmpRoot = filepath.Join(os.TempDir(), "pilot-diff-jobs")
 
+// resolveDBPath cari result.duckdb buat job id - coba JobStore in-memory dulu
+// (job yang baru selesai di sesi app ini), kalau nggak ketemu (mis. app baru
+// di-restart, klik riwayat dari sesi lama) fallback ke lokasi persisten di
+// disk yang dipakai handleProcess buat semua job.
+func resolveDBPath(store *JobStore, id string) (string, bool) {
+	if job, ok := store.Snapshot(id); ok && job.Status == StatusDone {
+		return job.DBPath, true
+	}
+	dbPath := filepath.Join(resultsRoot(), id, "result.duckdb")
+	if _, err := os.Stat(dbPath); err != nil {
+		return "", false
+	}
+	return dbPath, true
+}
+
 func parseOptions(c *fiber.Ctx) LoadOptions {
 	b := func(key string) bool {
 		v := c.FormValue(key)
@@ -104,7 +119,11 @@ func handleProcess(store *JobStore) fiber.Handler {
 		ctx, cancel := context.WithCancel(context.Background())
 		store.SetProcessing(id, cancel)
 
-		resultDBPath := filepath.Join(tmpRoot, id, "result.duckdb")
+		resultDBPath := filepath.Join(resultsRoot(), id, "result.duckdb")
+		if err := os.MkdirAll(filepath.Dir(resultDBPath), 0755); err != nil {
+			store.SetError(id, "gagal membuat folder hasil: "+err.Error())
+			return c.Status(500).JSON(fiber.Map{"error": "gagal membuat folder hasil"})
+		}
 		username, _ := c.Locals("username").(string)
 
 		// job adalah SALINAN (dari Snapshot), jadi aman ditutup di goroutine ini -
@@ -160,11 +179,22 @@ func handleResetJob(store *JobStore) fiber.Handler {
 func handleJobStatus(store *JobStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		id := c.Params("id")
-		job, ok := store.Snapshot(id)
-		if !ok {
+		if job, ok := store.Snapshot(id); ok {
+			return c.JSON(job)
+		}
+
+		// Job nggak ada di memori (app baru di-restart) - kalau ini job lama dari
+		// riwayat dan hasilnya masih ada di disk, rekonstruksi ringkasannya di sini
+		// biar panel riwayat tetap bisa nampilin angka match/selisih yang bener.
+		dbPath := filepath.Join(resultsRoot(), id, "result.duckdb")
+		if _, err := os.Stat(dbPath); err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "job tidak ditemukan"})
 		}
-		return c.JSON(job)
+		summary, err := FetchSummary(dbPath)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "gagal membaca ringkasan riwayat: " + err.Error()})
+		}
+		return c.JSON(Job{ID: id, Status: StatusDone, Summary: summary, DBPath: dbPath})
 	}
 }
 
@@ -182,12 +212,9 @@ func handleJobLog(store *JobStore) fiber.Handler {
 func handleJobResults(store *JobStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		id := c.Params("id")
-		job, ok := store.Snapshot(id)
+		dbPath, ok := resolveDBPath(store, id)
 		if !ok {
 			return c.Status(404).JSON(fiber.Map{"error": "job tidak ditemukan"})
-		}
-		if job.Status != StatusDone {
-			return c.Status(400).JSON(fiber.Map{"error": "job belum selesai diproses"})
 		}
 
 		category := c.Query("category", "selisih_kurang")
@@ -200,7 +227,7 @@ func handleJobResults(store *JobStore) fiber.Handler {
 			pageSize = 50
 		}
 
-		results, total, err := FetchResults(job.DBPath, category, page, pageSize)
+		results, total, err := FetchResults(dbPath, category, page, pageSize)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -233,12 +260,9 @@ func handleClearHistory(c *fiber.Ctx) error {
 func handleExport(store *JobStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		id := c.Params("id")
-		job, ok := store.Snapshot(id)
+		dbPath, ok := resolveDBPath(store, id)
 		if !ok {
 			return c.Status(404).JSON(fiber.Map{"error": "job tidak ditemukan"})
-		}
-		if job.Status != StatusDone {
-			return c.Status(400).JSON(fiber.Map{"error": "job belum selesai diproses"})
 		}
 
 		format := c.Query("format", "xlsx")
@@ -247,16 +271,16 @@ func handleExport(store *JobStore) fiber.Handler {
 		if validExportCategory[category] {
 			suffix = category
 		}
-		outPath := filepath.Join(filepath.Dir(job.DBPath), "export_"+suffix+"."+format)
+		outPath := filepath.Join(filepath.Dir(dbPath), "export_"+suffix+"."+format)
 
 		var err error
 		var filename string
 		switch format {
 		case "txt":
-			err = ExportTXT(job.DBPath, outPath, category)
+			err = ExportTXT(dbPath, outPath, category)
 			filename = "hasil_rekonsiliasi_" + suffix + ".txt"
 		case "xlsx":
-			err = ExportExcel(job.DBPath, outPath, category)
+			err = ExportExcel(dbPath, outPath, category)
 			filename = "hasil_rekonsiliasi_" + suffix + ".xlsx"
 		default:
 			return c.Status(400).JSON(fiber.Map{"error": "format tidak didukung, gunakan xlsx atau txt"})
