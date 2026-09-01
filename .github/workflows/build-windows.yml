@@ -33,6 +33,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path backend/webui | Out-Null
           Copy-Item -Path frontend/out/* -Destination backend/webui -Recurse -Force
 
+      - name: Embed app icon (winres/icon.ico) into exe resource
+        working-directory: backend
+        run: |
+          go install github.com/tc-hib/go-winres@latest
+          go-winres simply --arch amd64 --icon winres/icon.ico --product-name "Parse Bankers" --file-description "Parse Bankers - Reconciliation Portal"
+
       - name: Build backend exe
         working-directory: backend
         env:

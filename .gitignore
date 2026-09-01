@@ -3,4 +3,5 @@ node_modules/
 out/
 *.exe
 *.log
+*.syso
 /backend/webui/

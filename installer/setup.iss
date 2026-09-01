@@ -17,6 +17,7 @@ Compression=lzma
 SolidCompression=yes
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
+SetupIconFile=..\backend\winres\icon.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 
 [Files]

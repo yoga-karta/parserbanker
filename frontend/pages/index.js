@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import Head from "next/head";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api";
 
 const CATEGORIES = [
@@ -483,10 +484,14 @@ export default function Home() {
 
   return (
     <div className="app">
+      <Head>
+        <title>Parse Bankers - Reconciliation Portal</title>
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
-            <div className="logo-badge">BNI</div>
+            <img src="/bni-logo.png" alt="BNI" className="logo-badge" />
             <div>
               <h1>Reconciliation Portal</h1>
               <p>Automated Transaction Matching &bull; ATM vs Core Banking</p>
@@ -727,12 +732,7 @@ export default function Home() {
           display: flex; justify-content: space-between; align-items: center;
         }
         .brand { display: flex; align-items: center; gap: 14px; }
-        .logo-badge {
-          background: linear-gradient(135deg, #f2711c, #d85c10);
-          color: white; font-weight: 700; padding: 9px 14px; border-radius: 10px;
-          font-size: 15px; letter-spacing: 0.5px;
-          box-shadow: 0 8px 18px -8px rgba(242, 113, 28, 0.55);
-        }
+        .logo-badge { height: 36px; width: auto; display: block; }
         .brand h1 { margin: 0; font-size: 17px; font-weight: 700; color: #0d1425; }
         .brand p { margin: 2px 0 0; font-size: 12.5px; color: #8188a1; }
         .topbar-actions { display: flex; align-items: center; gap: 10px; }

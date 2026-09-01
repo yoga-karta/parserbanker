@@ -67,7 +67,7 @@ func main() {
 
 	w := webview.New(false)
 	defer w.Destroy()
-	w.SetTitle("Parse Bankers - Reconciliation Pilot Portal")
+	w.SetTitle("Parse Bankers - Reconciliation Portal")
 	w.SetSize(1280, 800, webview.HintNone)
 	w.Navigate("http://" + addr + "/")
 	w.Run()
