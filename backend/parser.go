@@ -95,11 +95,40 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 			continue
 		}
 
+		if strings.Contains(line, "PIN ENTERED") && current.SeqNr != "" {
+			// Nasabah masuk PIN lagi setelah satu percobaan sebelumnya udah dapat
+			// TRAN SEQ NR sendiri = mulai operasi baru di sesi kartu yang sama
+			// (mis. abis deposit pertama sukses, ATM minta PIN lagi buat percobaan
+			// berikutnya yang bisa aja gagal/rollback). Flush percobaan sebelumnya
+			// dulu, jangan sampai status percobaan baru numpuk ke yang lama
+			// (kejadian nyata: rec_num 407 - deposit sukses ke-tag ROLLBACK gara-gara
+			// percobaan kedua di sesi kartu yang sama gagal PING lalu di-rollback).
+			flush()
+			current.Amount = ""
+			current.SeqNr = ""
+			current.Status = ""
+		}
+
 		if match := reCard.FindStringSubmatch(line); len(match) > 1 {
 			current.CardNum = match[1]
 		} else if match := reTerminal.FindStringSubmatch(line); len(match) > 1 {
 			current.TerminalID = strings.TrimSpace(match[1])
 		} else if match := reAmount.FindStringSubmatch(line); len(match) > 1 {
+			if current.Amount != "" {
+				// Satu blok TRANSACTION START..END bisa berisi LEBIH DARI SATU
+				// percobaan (mis. deposit pertama sukses dapat TRAN SEQ NR, nasabah
+				// lanjut nyoba deposit lagi di sesi kartu yang sama dan itu yang
+				// PING ERROR/rollback). Flush percobaan sebelumnya sbg baris sendiri
+				// dulu sebelum mulai nampung percobaan baru - kalau nggak, status
+				// ROLLBACK punya percobaan KEDUA bakal numpuk salah ke percobaan
+				// PERTAMA yang udah sukses & punya TRAN SEQ NR sendiri (kejadian
+				// nyata: rec_num 407 - deposit sukses ke-tag ROLLBACK gara-gara
+				// percobaan berikutnya di sesi kartu yang sama gagal PING).
+				flush()
+				current.Amount = ""
+				current.SeqNr = ""
+				current.Status = ""
+			}
 			current.Amount = match[1]
 		} else if match := reSeq.FindStringSubmatch(line); len(match) > 1 {
 			current.SeqNr = match[1]

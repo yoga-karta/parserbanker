@@ -161,3 +161,64 @@ func TestParseATMLogToCSV_RollbackNotesWithoutOKIsNotRollback(t *testing.T) {
 		t.Errorf("seq 0695 status = %q, want SUCCESS (Rollback Notes tanpa OK bukan rollback beneran)", got)
 	}
 }
+
+// TestParseATMLogToCSV_SecondAttemptRollbackNotAttributedToFirst menguji bug
+// nyata rec_num 407: satu blok TRANSACTION START..END bisa punya LEBIH DARI
+// SATU percobaan. Deposit pertama (seq 0407, Rp3.800.000) sukses dapat TRAN
+// SEQ NR sendiri. Nasabah lanjut coba deposit lagi di sesi kartu yang sama -
+// percobaan KEDUA ini gagal di PING ERROR (nggak pernah dapat TRAN SEQ NR
+// sendiri) terus di-rollback. Rollback punya percobaan kedua ini dulu salah
+// numpuk ke record seq 0407 (yang beneran sukses & nggak ada sangkut paut).
+func TestParseATMLogToCSV_SecondAttemptRollbackNotAttributedToFirst(t *testing.T) {
+	raw := "25/07/2026 23:12:14 TRANSACTION START\n" +
+		"25/07/2026 23:12:14 CARD NUMBER 519893******0668\n" +
+		"25/07/2026 23:12:19 PIN ENTERED\n" +
+		"25/07/2026 23:13:05 Amount : 3800000\n" +
+		"25/07/2026 23:13:08 TRANSACTION REPLIED\n" +
+		"25/07/2026 23:13:08 TRAN SEQ NR [0407]\n" +
+		"25/07/2026 23:13:27 ----- Deposit Cash & Print ----\n" +
+		"25/07/2026 23:13:31 PIN ENTERED\n" + // percobaan deposit KEDUA, sesi kartu sama - masuk PIN lagi
+		"25/07/2026 23:14:27 EMV AID A0000006021010 / 519893******0668 STARTED\n" +
+		"25/07/2026 23:14:27 ***** Tran Request State *****\n" +
+		"25/07/2026 23:14:39 PING ERROR\n" + // gagal SEBELUM sempat ada baris Amount/TRAN SEQ NR sendiri
+		"25/07/2026 23:14:39 ----- Rollback Notes ----\n" +
+		"25/07/2026 23:14:59   Rollback OK\n" +
+		"25/07/2026 23:15:18 CARD(519893******0668) TAKEN\n" +
+		"25/07/2026 23:15:18 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	count, err := ParseATMLogToCSV(inPath, outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Percobaan kedua nggak pernah dapat TRAN SEQ NR (gagal PING sebelum
+	// TRANSACTION REQUESTING) - nggak ada yang bisa direkonsiliasi buat itu,
+	// jadi cuma 1 baris (seq 0407) yang harusnya kehasil.
+	if count != 1 {
+		t.Fatalf("count = %d, want 1 (percobaan kedua nggak punya TRAN SEQ NR, nggak boleh ke-flush)", count)
+	}
+
+	f, err := os.Open(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := rows[1]
+	if got[len(got)-1] != "SUCCESS" {
+		t.Errorf("seq 0407 status = %q, want SUCCESS (rollback punya percobaan kedua, bukan punya 0407)", got[len(got)-1])
+	}
+	if got[3] != "3800000" { // kolom amount
+		t.Errorf("seq 0407 amount = %q, want 3800000 (bukan ketiban amount percobaan kedua)", got[3])
+	}
+}
