@@ -3,7 +3,7 @@ import Head from "next/head";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api";
 
 const CATEGORIES = [
-  { key: "selisih_kurang", label: "Selisih Kurang", color: "#dc2626", bg: "#fef2f2", border: "#fecaca", legend: "Rollback dengan Nominal EJ dan Cash sama" },
+  { key: "selisih_kurang", label: "Selisih Kurang", color: "#dc2626", bg: "#fef2f2", border: "#fecaca", legend: "EJ Status Rollback OK / Rollback Notes Successfully / Shutter Opened for notes removal, dengan Nominal EJ dan Cash sama" },
   { key: "tidak_ditemukan", label: "Tidak Ditemukan", color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", legend: "Ada di salah satu file tapi tidak ditemukan pasangannya, atau nominal EJ dan Cash tidak sama" },
   { key: "match", label: "Match / Klop", color: "#059669", bg: "#ecfdf5", border: "#a7f3d0", legend: "Data EJ dan Cash sesuai" },
   { key: "data_invalid", label: "Data Rusak", color: "#d97706", bg: "#fffbeb", border: "#fde68a", legend: "Nominal EJ atau Cash tidak terbaca (data rusak/kosong)" },
@@ -326,6 +326,8 @@ export default function Home() {
           clearInterval(interval);
           setStatus("error");
           setErrorMsg(data.error || "Terjadi kesalahan saat kalkulasi data");
+        } else if (data.status === "stopped") {
+          clearInterval(interval);
         }
       } catch (err) {
         clearInterval(interval);
@@ -600,6 +602,7 @@ export default function Home() {
                     className={`kpi-card ${active ? "kpi-card-active" : ""}`}
                     style={active ? { borderColor: c.color } : undefined}
                     onClick={() => loadResults(jobId, c.key, 1)}
+                    title={c.legend}
                   >
                     <span className="kpi-label" style={{ color: c.color }}>{c.label}</span>
                     <strong className="kpi-value">{(s[c.key] ?? 0).toLocaleString("id-ID")}</strong>
@@ -626,16 +629,17 @@ export default function Home() {
                       className={`pill-btn ${activeCategory === c.key ? "pill-btn-active" : ""}`}
                       style={activeCategory === c.key ? { borderColor: c.color, color: c.color } : undefined}
                       onClick={() => loadResults(jobId, c.key, 1)}
+                      title={c.legend}
                     >
                       {c.label} ({(s[c.key] ?? 0).toLocaleString("id-ID")})
                     </button>
                   ))}
                 </div>
                 <div className="results-actions">
-                  <a className="btn-outline" href={exportUrl("xlsx", activeCategory)} target="_blank" rel="noreferrer">
+                  <a className="btn-outline" href={exportUrl("xlsx", activeCategory)}>
                     <IconExcel /> Excel
                   </a>
-                  <a className="btn-outline" href={exportUrl("txt", activeCategory)} target="_blank" rel="noreferrer">
+                  <a className="btn-outline" href={exportUrl("txt", activeCategory)}>
                     <IconFileText /> TXT
                   </a>
                 </div>

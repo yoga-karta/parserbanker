@@ -147,7 +147,7 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 					WHEN e.rec_num IS NULL THEN 'Tidak ada di EJ'
 					WHEN c.rec_num IS NULL THEN 'Tidak ada di RC'
 					WHEN e.nominal IS NULL OR c.nominal IS NULL THEN 'Nominal tidak terbaca (data rusak/kosong)'
-					WHEN c.nominal = e.nominal AND e.ej_status IN ('ROLLBACK OK', 'ROLLBACK NOTES SUCCESSFULLY', 'SHUTTER OPENED FOR NOTES REMOVAL') THEN 'Transaksi rollback di EJ - dana kemungkinan sudah keluar'
+					WHEN c.nominal = e.nominal AND e.ej_status IN ('ROLLBACK OK', 'ROLLBACK NOTES SUCCESSFULLY', 'SHUTTER OPENED FOR NOTES REMOVAL') THEN 'EJ menunjukkan dana sudah keluar dari mesin - nominal EJ dan Cash sama'
 					WHEN c.nominal <> e.nominal THEN 'Nominal EJ dan Cash tidak sama'
 					ELSE '-'
 				END AS keterangan,
