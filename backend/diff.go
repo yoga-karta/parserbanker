@@ -115,14 +115,16 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 		// yang nominal-nya gagal di-cast (NULL) berhenti di sini dan tidak pernah
 		// jatuh ke kondisi lain.
 		//
-		// "Selisih Kurang" (per keputusan 1 Sep 2026) HANYA berlaku buat baris
-		// ROLLBACK yang nominal EJ dan Cash-nya SAMA - bukan lagi generic "cash
-		// lebih kecil dari EJ". Kategori "Selisih Lebih" dihapus total. Baris
-		// mana pun yang nominalnya beda (rollback atau bukan) jatuh ke
-		// 'tidak_ditemukan' - dianggap butuh review manual, bukan match otomatis.
-		// ej_status = 'ROLLBACK' cuma di-set kalau EJ eksplisit nyebut "Rollback
-		// OK" (lihat parser.go) - bukan sekadar kata "Rollback" muncul di baris
-		// manapun.
+		// "Selisih Kurang" (per keputusan 1 Sep 2026, diperluas 3 Sep 2026) HANYA
+		// berlaku buat baris dengan salah satu dari 3 EJ Status berikut DAN
+		// nominal EJ-Cash-nya SAMA - bukan lagi generic "cash lebih kecil dari
+		// EJ". Kategori "Selisih Lebih" dihapus total. EJ Status selain 3 ini
+		// (mis. SUCCESS) tetap di-skip dari Selisih Kurang - kalau nominal sama
+		// jatuh ke 'match' seperti biasa. Baris mana pun yang nominalnya beda
+		// jatuh ke 'tidak_ditemukan' - dianggap butuh review manual, bukan match
+		// otomatis. Ketiga status ini cuma di-set kalau EJ eksplisit nyebut
+		// teksnya persis (lihat parser.go) - bukan sekadar kata "Rollback"/
+		// "Shutter" muncul di baris manapun.
 		`CREATE TABLE diff_result AS
 			SELECT
 				COALESCE(e.rec_num, c.rec_num, '') AS rec_num,
@@ -137,7 +139,7 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 				CASE
 					WHEN e.rec_num IS NULL OR c.rec_num IS NULL THEN 'tidak_ditemukan'
 					WHEN e.nominal IS NULL OR c.nominal IS NULL THEN 'data_invalid'
-					WHEN c.nominal = e.nominal AND e.ej_status = 'ROLLBACK' THEN 'selisih_kurang'
+					WHEN c.nominal = e.nominal AND e.ej_status IN ('ROLLBACK OK', 'ROLLBACK NOTES SUCCESSFULLY', 'SHUTTER OPENED FOR NOTES REMOVAL') THEN 'selisih_kurang'
 					WHEN c.nominal = e.nominal THEN 'match'
 					ELSE 'tidak_ditemukan'
 				END AS category,
@@ -145,14 +147,14 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 					WHEN e.rec_num IS NULL THEN 'Tidak ada di EJ'
 					WHEN c.rec_num IS NULL THEN 'Tidak ada di RC'
 					WHEN e.nominal IS NULL OR c.nominal IS NULL THEN 'Nominal tidak terbaca (data rusak/kosong)'
-					WHEN c.nominal = e.nominal AND e.ej_status = 'ROLLBACK' THEN 'Transaksi rollback di EJ - dana kemungkinan sudah keluar'
+					WHEN c.nominal = e.nominal AND e.ej_status IN ('ROLLBACK OK', 'ROLLBACK NOTES SUCCESSFULLY', 'SHUTTER OPENED FOR NOTES REMOVAL') THEN 'Transaksi rollback di EJ - dana kemungkinan sudah keluar'
 					WHEN c.nominal <> e.nominal THEN 'Nominal EJ dan Cash tidak sama'
 					ELSE '-'
 				END AS keterangan,
 				CASE
 					WHEN e.rec_num IS NULL OR c.rec_num IS NULL THEN NULL
 					WHEN e.nominal IS NULL OR c.nominal IS NULL THEN NULL
-					WHEN c.nominal = e.nominal AND e.ej_status = 'ROLLBACK' THEN 'Nasabah Diuntungkan'
+					WHEN c.nominal = e.nominal AND e.ej_status IN ('ROLLBACK OK', 'ROLLBACK NOTES SUCCESSFULLY', 'SHUTTER OPENED FOR NOTES REMOVAL') THEN 'Nasabah Diuntungkan'
 					ELSE NULL
 				END AS kemungkinan_penyebab
 			FROM ej e FULL OUTER JOIN rc c ON e.rec_num = c.rec_num`,

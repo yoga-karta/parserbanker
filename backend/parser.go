@@ -142,7 +142,18 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 			// kadang punya 2 baris "Rollback Notes" tapi cuma yang beneran
 			// ke-rollback yang diikuti "Rollback OK"; baris kedua cuma housekeeping
 			// penutupan transaksi dan bukan rollback sungguhan.
-			current.Status = "ROLLBACK"
+			current.Status = "ROLLBACK OK"
+		} else if strings.Contains(strings.ToUpper(line), "ROLLBACK NOTES SUCCESSFULLY") {
+			// Status EJ kedua (per keputusan 3 Sep 2026) yang berarti dana sudah
+			// keluar mesin: sama perlakuannya dengan "Rollback OK" buat kategorisasi
+			// Selisih Kurang (lihat diff.go), tapi disimpan apa adanya (bukan
+			// dinormalisasi jadi satu label generik) supaya EJ Status yang
+			// ditampilkan ke user tetap persis sama seperti di log mentah.
+			current.Status = "ROLLBACK NOTES SUCCESSFULLY"
+		} else if strings.Contains(strings.ToUpper(line), "SHUTTER OPENED FOR NOTES REMOVAL") {
+			// Status EJ ketiga (per keputusan 3 Sep 2026), perlakuan sama seperti
+			// dua status rollback di atas.
+			current.Status = "SHUTTER OPENED FOR NOTES REMOVAL"
 		}
 	}
 	flush()

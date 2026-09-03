@@ -154,11 +154,60 @@ func TestParseATMLogToCSV_RollbackNotesWithoutOKIsNotRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := rows[1][len(rows[1])-1]; got != "ROLLBACK" {
-		t.Errorf("seq 0694 status = %q, want ROLLBACK (ada Rollback OK beneran di blok ini)", got)
+	if got := rows[1][len(rows[1])-1]; got != "ROLLBACK OK" {
+		t.Errorf("seq 0694 status = %q, want ROLLBACK OK (ada Rollback OK beneran di blok ini)", got)
 	}
 	if got := rows[2][len(rows[2])-1]; got != "SUCCESS" {
 		t.Errorf("seq 0695 status = %q, want SUCCESS (Rollback Notes tanpa OK bukan rollback beneran)", got)
+	}
+}
+
+// TestParseATMLogToCSV_RollbackNotesSuccessfullyAndShutterOpened menguji 2 EJ
+// Status tambahan (keputusan 3 Sep 2026) yang diperlakukan sama seperti
+// "Rollback OK" buat kategorisasi Selisih Kurang (lihat diff.go), tapi
+// disimpan apa adanya di kolom status (bukan dinormalisasi ke satu label).
+func TestParseATMLogToCSV_RollbackNotesSuccessfullyAndShutterOpened(t *testing.T) {
+	raw := "17/06/2026 10:00:00 TRANSACTION START\n" +
+		"17/06/2026 10:00:00 CARD NUMBER 111111\n" +
+		"17/06/2026 10:00:05 Amount : 100000\n" +
+		"17/06/2026 10:00:10 TRANSACTION REPLIED\n" +
+		"17/06/2026 10:00:10 TRAN SEQ NR [0001]\n" +
+		"17/06/2026 10:00:15   Rollback Notes Successfully\n" +
+		"17/06/2026 10:00:20 TRANSACTION END\n" +
+		"17/06/2026 10:01:00 TRANSACTION START\n" +
+		"17/06/2026 10:01:00 CARD NUMBER 222222\n" +
+		"17/06/2026 10:01:05 Amount : 200000\n" +
+		"17/06/2026 10:01:10 TRANSACTION REPLIED\n" +
+		"17/06/2026 10:01:10 TRAN SEQ NR [0002]\n" +
+		"17/06/2026 10:01:15   Shutter Opened for notes removal\n" +
+		"17/06/2026 10:01:20 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.Open(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := rows[1][len(rows[1])-1]; got != "ROLLBACK NOTES SUCCESSFULLY" {
+		t.Errorf("seq 0001 status = %q, want ROLLBACK NOTES SUCCESSFULLY", got)
+	}
+	if got := rows[2][len(rows[2])-1]; got != "SHUTTER OPENED FOR NOTES REMOVAL" {
+		t.Errorf("seq 0002 status = %q, want SHUTTER OPENED FOR NOTES REMOVAL", got)
 	}
 }
 
