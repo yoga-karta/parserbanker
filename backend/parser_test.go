@@ -271,3 +271,310 @@ func TestParseATMLogToCSV_SecondAttemptRollbackNotAttributedToFirst(t *testing.T
 		t.Errorf("seq 0407 amount = %q, want 3800000 (bukan ketiban amount percobaan kedua)", got[3])
 	}
 }
+
+// TestParseATMLogToCSV_SeqNrFromNoRekord menguji fix bug: anchor nomor urut
+// transaksi dulu cuma "TRAN SEQ NR [...]" yang CUMA ada di EJ mesin DN200V.
+// Mesin Hyosung/Hitachi/OKI nol kemunculan field itu, jadi SeqNr selalu kosong
+// dan flush() nggak pernah nulis baris - hasilnya count=0 dan LoadEJ nolak
+// filenya ("tidak ada transaksi valid"). Struk cetak "NO. REKORD <n>" ada di
+// SEMUA merek dan nilainya sama persis dengan rec_num yang dipakai buat join ke
+// RC, jadi itu yang dipakai sebagai anchor universal. Format strukmya beda
+// tipis antar merek: ada yang polos ("NO. REKORD 8783") ada yang pakai titik
+// dua ("NO. REKORD   : 5822").
+func TestParseATMLogToCSV_SeqNrFromNoRekord(t *testing.T) {
+	// Cuplikan asli EJ Hyosung S1CBPNR030 (rec 8786) dan Hitachi S1GSMDR001
+	// (varian pakai titik dua) - dipendekin, format barisnya dipertahankan.
+	raw := "17/08/2026 03:10:00 TRANSACTION START\n" +
+		"17/08/2026 03:10:01 Terminal ID    [S1CBPNR030]\n" +
+		"17/08/2026 03:10:01 Card Inserted\n" +
+		"17/08/2026 03:10:01 TRANSACTION START\n" +
+		"17/08/2026 03:10:01 Card Number 537176XXXXXX7766\n" +
+		"17/08/2026 03:10:20 OP Code : ADBBA  A\n" +
+		"17/08/2026 03:10:20 Amount : 250000\n" +
+		"17/08/2026 03:10:21 TRANSACTION REPLIED\n" +
+		"[Transaction record]\n" +
+		"Trans SEQ Number [8786]\n" +
+		"    537176******7766 \n" +
+		"    NO. REKORD 8786\n" +
+		"17/08/2026 03:10:40 TRANSACTION END\n" +
+		"08/20/2026 17:30:12 TRANSACTION START\n" +
+		"08/20/2026 17:30:12 Terminal ID    [S1GSMDR001]\n" +
+		"08/20/2026 17:30:12 Card Number: 519893******7403\n" +
+		"08/20/2026 17:30:12 Amount : 000000780012\n" +
+		"08/20/2026 17:30:14 TRANSACTION REPLIED\n" +
+		"NO. REKORD   : 6388\n" +
+		"08/20/2026 17:30:30 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	count, err := ParseATMLogToCSV(inPath, outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2 (EJ tanpa TRAN SEQ NR harus tetap keparse lewat NO. REKORD)", count)
+	}
+
+	rows := readCSV(t, outPath)
+	if got := rows[1][4]; got != "8786" { // kolom seq_nr
+		t.Errorf("seq_nr baris 1 = %q, want 8786 (NO. REKORD tanpa titik dua)", got)
+	}
+	if got := rows[2][4]; got != "6388" {
+		t.Errorf("seq_nr baris 2 = %q, want 6388 (NO. REKORD pakai titik dua)", got)
+	}
+}
+
+// TestParseATMLogToCSV_CardAndTerminalFormatVariants menguji varian format
+// field di 3 merek baru: Hyosung/Hitachi/OKI nulis "Card Number" (bukan
+// all-caps) dengan/ tanpa titik dua dan mask-nya bisa pakai 'X' bukan '*',
+// sementara OKI nulis "Terminal ID : S1BGBRR006" tanpa kurung siku. Baris
+// "Card Number    [5198930898695126]" di blok [Transaction record] OKI berisi
+// PAN UTUH tanpa mask - itu TIDAK boleh ikut kepungut ke kolom card_masked.
+func TestParseATMLogToCSV_CardAndTerminalFormatVariants(t *testing.T) {
+	// Cuplikan asli EJ OKI S1BGBRR006 (rec 3982) + Hyosung (mask 'X').
+	raw := "17/08/2026 01:21:22 TRANSACTION START\n" +
+		"17/08/2026 01:21:22 Terminal ID : S1BGBRR006\n" +
+		"17/08/2026 01:21:32 Card Number : **********695126\n" +
+		"17/08/2026 01:21:34 Amount : 450000\n" +
+		"17/08/2026 01:21:37 [Transaction record]\n" +
+		"17/08/2026 01:21:37 Card Number    [5198930898695126]\n" +
+		"    NO. REKORD 3982\n" +
+		"17/08/2026 01:22:33 TRANSACTION END\n" +
+		"17/08/2026 02:40:01 TRANSACTION START\n" +
+		"17/08/2026 02:40:01 Terminal ID    [S1CBPNR030]\n" +
+		"17/08/2026 02:40:01 Card Number 537176XXXXXX7766\n" +
+		"17/08/2026 02:40:59 Amount : 250000\n" +
+		"    NO. REKORD 8786\n" +
+		"17/08/2026 02:41:20 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+	rows := readCSV(t, outPath)
+
+	if got := rows[1][1]; got != "**********695126" { // kolom card_masked
+		t.Errorf("card OKI = %q, want **********695126 (versi ber-mask, bukan PAN utuh)", got)
+	}
+	if got := rows[1][2]; got != "S1BGBRR006" { // kolom terminal_id
+		t.Errorf("terminal OKI = %q, want S1BGBRR006 (format titik dua tanpa kurung siku)", got)
+	}
+	if got := rows[2][1]; got != "537176XXXXXX7766" {
+		t.Errorf("card Hyosung = %q, want 537176XXXXXX7766 (mask pakai X)", got)
+	}
+}
+
+// TestParseATMLogToCSV_DepositAmountImpliedDecimals menguji fix nominal setor
+// tunai. Di Hitachi & Hyosung, baris "Amount :" pas TRANSACTION REQUESTING buat
+// transaksi setor (OP Code BB) dikirim apa adanya dari field ISO-8583 yang
+// pakai 2 desimal implisit, jadi nilainya 100x nominal asli (bukti: EJ Hitachi
+// rec 5830 "Amount : 30000000" vs RC 300000; Hyosung rec 8783 "Amount :
+// 195000000" vs RC 1950000). DN200V & OKI nggak begitu - nominalnya 1:1.
+// Daripada nebak per merek, faktor 100-nya dibuktiin sendiri sama mesinnya:
+// hasil hitungan uang fisik "Total Amount IDR <n>" di blok yang sama harus
+// persis Amount/100. Kalau nggak persis, nominal dibiarkan apa adanya.
+func TestParseATMLogToCSV_DepositAmountImpliedDecimals(t *testing.T) {
+	// Cuplikan asli EJ Hyosung S1CBPNR030 rec 8783 (setor Rp1.950.000) dan
+	// DN200V S1DTRBR013 rec 2727 (setor Rp4.850.000, sudah 1:1).
+	raw := "17/08/2026 02:40:00 TRANSACTION START\n" +
+		"17/08/2026 02:40:01 Card Number 537176XXXXXX7766\n" +
+		"17/08/2026 02:40:47 Notes Counted:\n" +
+		"IDR50000x7\n" +
+		"IDR100000x16\n" +
+		"Rejectx3\n" +
+		"Total Amount IDR 1950000\n" +
+		"17/08/2026 02:40:59 OP Code : BB     A\n" +
+		"17/08/2026 02:40:59 Amount : 195000000\n" +
+		"17/08/2026 02:41:01 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 8783\n" +
+		"    DEPOSIT                 RP1.950.000  \n" +
+		"17/08/2026 02:41:20 TRANSACTION END\n" +
+		"30/06/2026 08:58:00 TRANSACTION START\n" +
+		"30/06/2026 08:58:00 CARD NUMBER 519893******7283\n" +
+		"30/06/2026 08:58:30 TOTAL AMOUNT IDR 4850000\n" +
+		"30/06/2026 08:58:47 OP Code : BB     A\n" +
+		"30/06/2026 08:58:47 Amount : 4850000\n" +
+		"30/06/2026 08:58:48 TRANSACTION REPLIED\n" +
+		"30/06/2026 08:58:48 TRAN SEQ NR [2727]\n" +
+		"    NO. REKORD 2727\n" +
+		"30/06/2026 08:59:20 TRANSACTION END\n" +
+		// Setor yang nominalnya NGGAK bisa dibuktiin hitungan uang fisik
+		// (nggak ada baris Total Amount IDR) - biarkan apa adanya, jangan nebak.
+		"19/08/2026 00:03:35 TRANSACTION START\n" +
+		"19/08/2026 00:03:35 Card Number: 194634******7344\n" +
+		"19/08/2026 00:03:35 OP Code : BB     A\n" +
+		"19/08/2026 00:03:35 Amount : 000470000000\n" +
+		"19/08/2026 00:03:37 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 5819\n" +
+		"19/08/2026 00:03:58 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+	rows := readCSV(t, outPath)
+
+	if got := rows[1][3]; got != "1950000" { // kolom amount
+		t.Errorf("amount Hyosung = %q, want 1950000 (Amount:/100 dibuktikan Total Amount IDR)", got)
+	}
+	if got := rows[2][3]; got != "4850000" {
+		t.Errorf("amount DN200V = %q, want 4850000 (sudah 1:1, jangan diutak-atik)", got)
+	}
+	if got := rows[3][3]; got != "000470000000" {
+		t.Errorf("amount tanpa bukti hitungan = %q, want 000470000000 (biarkan apa adanya)", got)
+	}
+}
+
+// readCSV baca hasil parser jadi slice baris (baris 0 = header).
+func readCSV(t *testing.T, path string) [][]string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+// TestParseATMLogToCSV_SeqNrZeroPaddingNormalized menguji kejadian nyata di EJ
+// DN200V S1GBMSR055 rec 660: satu transaksi yang di-retry ke host ke-log dua
+// kali dengan seq sama. Copy pertama nyebut seq di DUA tempat dengan format
+// beda - "TRAN SEQ NR [0660]" (nol-padding) dan struk " NO. REKORD  660"
+// (tanpa padding) - sedangkan copy kedua cuma nyebut yang ber-padding. Kalau
+// seq disimpan apa adanya, dua copy itu punya dedup key beda dan transaksi yang
+// sama kehitung dobel. Angkanya sama, jadi nol depannya dibuang.
+func TestParseATMLogToCSV_SeqNrZeroPaddingNormalized(t *testing.T) {
+	raw := "09/07/2026 15:14:03 TRANSACTION START\n" +
+		"09/07/2026 15:14:03 CARD NUMBER 524559******7776\n" +
+		"09/07/2026 15:15:29 Amount : 600000\n" +
+		"09/07/2026 15:15:32 TRANSACTION REPLIED\n" +
+		"09/07/2026 15:15:32 TRAN SEQ NR [0660]\n" +
+		" NO. REKORD  660\n" +
+		"09/07/2026 15:16:46 Amount : 600000\n" + // retry ke host, seq sama
+		"09/07/2026 15:16:47 TRAN SEQ NR [0660]\n" +
+		"09/07/2026 15:17:00 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	count, err := ParseATMLogToCSV(inPath, outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1 (retry seq sama gak boleh kehitung dobel)", count)
+	}
+	if got := readCSV(t, outPath)[1][4]; got != "660" {
+		t.Errorf("seq_nr = %q, want 660 (nol depan dibuang biar satu format)", got)
+	}
+}
+
+// TestParseATMLogToCSV_TwoDepositsOneSessionScaledIndependently menguji urutan
+// baris yang bikin normalisasi nominal gampang salah: hasil hitungan uang
+// ("Total Amount IDR") selalu muncul SEBELUM baris "Amount :" transaksi yang
+// sama. Kalau satu sesi kartu isinya dua setoran (kejadian nyata di EJ Hitachi
+// S1GSMDR001 rec 5819 & 5820), pas setoran pertama di-flush, hitungan uang yang
+// kesimpen udah kegantikan punya setoran KEDUA - jadi normalisasi harus dikunci
+// pas baris "Amount :" dibaca, bukan pas flush.
+func TestParseATMLogToCSV_TwoDepositsOneSessionScaledIndependently(t *testing.T) {
+	// Cuplikan asli EJ Hitachi S1GSMDR001 (rec 5819 Rp4.700.000, rec 5820
+	// Rp1.400.000) - dipendekin, urutan barisnya dipertahankan.
+	raw := "08/19/2026 00:02:43 TRANSACTION START\n" +
+		"08/19/2026 00:02:44 Card Number: 194634******7344\n" +
+		"08/19/2026 00:03:21 Notes Counted:\n" +
+		"IDR100000x47\n" +
+		"Rejectx3\n" +
+		"Total Amount IDR 4700000\n" +
+		"08/19/2026 00:03:35 OP Code : BB     A\n" +
+		"08/19/2026 00:03:35 Amount : 000470000000\n" +
+		"08/19/2026 00:03:37 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 5819\n" +
+		"08/19/2026 00:04:28 Notes Counted:\n" +
+		"IDR100000x14\n" +
+		"Total Amount IDR 1400000\n" +
+		"08/19/2026 00:04:45 OP Code : BB     A\n" +
+		"08/19/2026 00:04:45 Amount : 000140000000\n" +
+		"08/19/2026 00:04:48 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 5820\n" +
+		"08/19/2026 00:05:10 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	count, err := ParseATMLogToCSV(inPath, outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2", count)
+	}
+	rows := readCSV(t, outPath)
+	if got := rows[1][3]; got != "4700000" {
+		t.Errorf("amount rec 5819 = %q, want 4700000", got)
+	}
+	if got := rows[2][3]; got != "1400000" {
+		t.Errorf("amount rec 5820 = %q, want 1400000", got)
+	}
+}
+
+// TestParseATMLogToCSV_DispensedTotalNeverRescales mengunci scope normalisasi
+// nominal: yang boleh jadi bukti faktor 100 CUMA hitungan uang MASUK ("Notes
+// Counted", setor tunai) - hitungan uang KELUAR ("NOTES DISPENSED", penarikan)
+// nggak boleh. Kejadian nyata yang bikin ini penting: EJ DN200V S1DTRBR013 rec
+// 3285 punya satu sesi kartu berisi permintaan Rp5.000.000 DAN pengeluaran uang
+// Rp50.000 - persis 100x. Kalau hitungan uang keluar dipakai sebagai bukti,
+// selisih Rp4.950.000 yang beneran bakal ketutup jadi "match".
+func TestParseATMLogToCSV_DispensedTotalNeverRescales(t *testing.T) {
+	raw := "01/07/2026 07:06:00 TRANSACTION START\n" +
+		"01/07/2026 07:06:00 CARD NUMBER 537176******6807\n" +
+		"01/07/2026 07:07:12 NOTES DISPENSED:\n" +
+		"IDR50000*1\n" +
+		"TOTAL AMOUNT IDR 50000\n" +
+		"01/07/2026 07:07:30 Amount : 5000000\n" +
+		"01/07/2026 07:07:32 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 3285\n" +
+		"01/07/2026 07:08:00 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := readCSV(t, outPath)[1][3]; got != "5000000" {
+		t.Errorf("amount = %q, want 5000000 (hitungan uang KELUAR bukan bukti skala setor)", got)
+	}
+}
