@@ -43,6 +43,20 @@ var (
 	reNotesTotal = regexp.MustCompile(`(?i)TOTAL AMOUNT IDR\s*([0-9]+)`)
 )
 
+// resetKeepTerminal ngosongin field per-transaksi (Amount, SeqNr, CardNum,
+// Status, hitungan uang) tapi MEMPERTAHANKAN Terminal ID. Satu file EJ = satu
+// mesin fisik, jadi Terminal ID-nya konstan buat semua transaksi di file itu -
+// bukan data per-transaksi yang harus di-reset. Ini yang bikin EJ Hyosung &
+// Hitachi dulu terminal_id-nya kosong 100%: kedua merek nulis DUA baris
+// "TRANSACTION START" berturut-turut per satu transaksi (yang pertama pembuka
+// sesi kartu, yang kedua pembuka transaksinya) dengan baris "Terminal ID" ke-log
+// di antara keduanya, jadi reset di START kedua ngehapus Terminal ID yang barusan
+// kebaca. DN200V & OKI cuma punya satu START dan Terminal ID-nya ke-log ulang
+// tiap blok, jadi mereka nggak keubah sama sekali.
+func resetKeepTerminal(prev ATMLogRecord) ATMLogRecord {
+	return ATMLogRecord{TerminalID: prev.TerminalID}
+}
+
 // ParseATMLogToCSV membaca log mentah EJ ATM (multi-line, per-transaction-block)
 // dan mengekstrak jadi CSV ternormalisasi. Blok dipotong berdasarkan TRANSACTION
 // START berikutnya (atau EOF), bukan baris "akhir transaksi" tertentu - supaya
@@ -94,7 +108,7 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 
 		if strings.Contains(line, "TRANSACTION START") {
 			flush()
-			current = ATMLogRecord{}
+			current = resetKeepTerminal(current)
 			parts := strings.SplitN(line, " ", 3)
 			if len(parts) >= 2 {
 				current.Timestamp = parts[0] + " " + parts[1]
@@ -110,7 +124,7 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 			// kebaca sebagai bagian transaksi yang barusan kelar dan salah nge-mark
 			// transaksi itu ROLLBACK padahal blok transaksinya sendiri bersih.
 			flush()
-			current = ATMLogRecord{}
+			current = resetKeepTerminal(current)
 			continue
 		}
 

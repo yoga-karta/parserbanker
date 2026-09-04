@@ -578,3 +578,56 @@ func TestParseATMLogToCSV_DispensedTotalNeverRescales(t *testing.T) {
 		t.Errorf("amount = %q, want 5000000 (hitungan uang KELUAR bukan bukti skala setor)", got)
 	}
 }
+
+// TestParseATMLogToCSV_TerminalIDSurvivesNestedTransactionStart menguji bug
+// nyata di EJ Hyosung & Hitachi: satu transaksi fisik dibuka DUA baris
+// "TRANSACTION START" berturut-turut (yang pertama pembuka sesi kartu, yang
+// kedua pembuka transaksinya), dan baris "Terminal ID" ke-log di antara
+// keduanya. Reset current di START kedua ikut ngehapus Terminal ID yang barusan
+// kebaca, jadi SEMUA baris hasil parsing kedua merek itu terminal_id-nya kosong.
+// Terminal ID konstan per file (satu file EJ = satu mesin fisik), jadi nilainya
+// harus tetap kebawa lintas reset.
+func TestParseATMLogToCSV_TerminalIDSurvivesNestedTransactionStart(t *testing.T) {
+	// Cuplikan asli EJ Hyosung S1CBPNR030 (rec 8783) + Hitachi S1GSMDR001.
+	raw := "17/08/2026 02:40:00 TRANSACTION START\n" +
+		"17/08/2026 02:40:01 Terminal ID    [S1CBPNR030]\n" +
+		"17/08/2026 02:40:01 Card Inserted\n" +
+		"17/08/2026 02:40:01 TRANSACTION START\n" +
+		"17/08/2026 02:40:01 Card Number 537176XXXXXX7766\n" +
+		"17/08/2026 02:40:59 Amount : 250000\n" +
+		"17/08/2026 02:41:01 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 8783\n" +
+		"17/08/2026 02:41:20 TRANSACTION END\n" +
+		// Transaksi berikutnya di file yang sama: Terminal ID-nya kebaca di blok
+		// SEBELUMNYA aja pun harus tetap nempel (di sini tetap ke-log ulang, tapi
+		// yang diuji adalah nilainya nggak hilang gara-gara START kedua).
+		"19/08/2026 00:07:02 TRANSACTION START\n" +
+		"19/08/2026 00:07:02 Terminal ID    [S1CBPNR030]\n" +
+		"19/08/2026 00:07:02 Card Inserted\n" +
+		"19/08/2026 00:07:02 TRANSACTION START\n" +
+		"19/08/2026 00:07:02 Card Number: 194634******7344\n" +
+		"19/08/2026 00:07:10 Amount : 500000\n" +
+		"19/08/2026 00:07:12 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 8784\n" +
+		"19/08/2026 00:07:30 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+	rows := readCSV(t, outPath)
+	if len(rows) != 3 {
+		t.Fatalf("jumlah baris = %d, want 3 (header + 2 transaksi)", len(rows)-1)
+	}
+	for i := 1; i < len(rows); i++ {
+		if got := rows[i][2]; got != "S1CBPNR030" { // kolom terminal_id
+			t.Errorf("terminal_id baris %d = %q, want S1CBPNR030 (kehapus reset TRANSACTION START kedua)", i, got)
+		}
+	}
+}
