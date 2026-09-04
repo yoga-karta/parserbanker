@@ -103,6 +103,45 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 		}
 	}
 
+	// setDanaKembali nge-set salah satu dari 3 EJ Status yang bikin baris masuk
+	// kategori "Selisih Kurang" (lihat diff.go) - tapi CUMA kalau kejadiannya
+	// beneran "duit nasabah balik keluar dari mesin", bukan sekadar teksnya
+	// muncul. Dua syarat fisiknya:
+	//
+	//  1. Uang harus MASUK dulu (current.NotesIn). Kalimat "Shutter Opened for
+	//     notes removal" dipakai mesin OKI buat DUA hal yang beda 180 derajat:
+	//     nasabah ngambil uang hasil PENARIKAN (uang keluar, transaksi normal)
+	//     dan mesin ngebalikin SETORAN yang ditolak. Bedanya cuma arah uangnya -
+	//     penarikan didahului "Banknote separation in cassette", setoran
+	//     didahului "Counted banknote". Tanpa syarat ini, 1356 penarikan sukses
+	//     biasa di EJ OKI S1BGBRR006 ke-tag Selisih Kurang senilai
+	//     Rp1.052.900.000.
+	//  2. Permintaan ke host harus udah kekirim (current.Amount kebaca). Sebelum
+	//     transaksinya kecatat di host, shutter yang kebuka itu buat MENGEMBALIKAN
+	//     lembar uang yang DITOLAK hitungan mesin - kejadian normal di setoran
+	//     yang sukses total (kejadian nyata: OKI rec 4000 setor Rp1.250.000 dengan
+	//     "Rejectx1", Hitachi rec 6041 dengan "Rejectx4"). Dana yang beneran balik
+	//     ke nasabah selalu ke-log SESUDAH host ngebales.
+	//
+	// Ground truth-nya dari client (REVISI.docx + lampiran SK per mesin): Hitachi
+	// S1GSMDR001 cuma rec 6041 (Rp9.500.000), Hyosung S1CBPNR030 cuma rec 9109
+	// (Rp9.400.000), OKI S1BGBRR006 cuma rec 4842 (Rp2.500.000).
+	setDanaKembali := func(label string) {
+		if !current.NotesIn || current.Amount == "" {
+			return
+		}
+		// "Shutter Opened for notes removal" cuma akibat mekanis dari rollback:
+		// di Hitachi rec 6041 baris ini nyusul "Rollback Notes Successfully" di
+		// detik yang sama. Indikator yang lebih spesifik jangan sampai ketimpa -
+		// kategorinya sama-sama Selisih Kurang, tapi EJ Status yang ditampilkan
+		// ke user harus yang nyebut sebabnya.
+		if label == "SHUTTER OPENED FOR NOTES REMOVAL" &&
+			(current.Status == "ROLLBACK OK" || current.Status == "ROLLBACK NOTES SUCCESSFULLY") {
+			return
+		}
+		current.Status = label
+	}
+
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -128,7 +167,15 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 			continue
 		}
 
-		if strings.Contains(line, "PIN ENTERED") && current.SeqNr != "" {
+		// Case-insensitive: DN200V & OKI nulis "PIN ENTERED" all-caps, tapi
+		// Hitachi & Hyosung nulis "PIN Entered:". Selama dicek case-sensitive,
+		// batas percobaan di dua merek itu NGGAK PERNAH kena, jadi status
+		// percobaan BERIKUTNYA numpuk balik ke transaksi sebelumnya yang udah
+		// kelar sukses (kejadian nyata: Hitachi rec 6037 setor Rp4.900.000 dengan
+		// struk "DEPOSIT ... KE TABUNGAN" ke-tag shutter/rollback punya setoran
+		// sesudahnya). Ini penyebab 87 baris Selisih Kurang palsu di Hitachi dan
+		// 124 di Hyosung.
+		if strings.Contains(strings.ToUpper(line), "PIN ENTERED") && current.SeqNr != "" {
 			// Nasabah masuk PIN lagi setelah satu percobaan sebelumnya udah dapat
 			// TRAN SEQ NR sendiri = mulai operasi baru di sesi kartu yang sama
 			// (mis. abis deposit pertama sukses, ATM minta PIN lagi buat percobaan
@@ -182,11 +229,22 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 					current.Amount = current.NotesTotal
 				}
 			}
-		} else if upper := strings.ToUpper(line); strings.Contains(upper, "NOTES COUNTED") {
+		} else if upper := strings.ToUpper(line); strings.Contains(upper, "NOTES COUNTED") ||
+			strings.Contains(upper, "COUNTED BANKNOTE") {
+			// Arah uang: MASUK. Kalimatnya beda antar merek - DN200V/Hitachi/Hyosung
+			// "NOTES COUNTED", OKI "Counted banknote". Dipakai buat dua hal: bukti
+			// skala nominal setor (lihat cabang reAmount) dan syarat pertama
+			// setDanaKembali.
 			current.NotesIn = true
-		} else if strings.Contains(upper, "NOTES DISPENSED") {
-			// Hitungan uang KELUAR (penarikan) nggak boleh jadi bukti skala nominal
-			// setor - lihat komentar di baris Amount.
+		} else if strings.Contains(upper, "NOTES DISPENSED") ||
+			strings.Contains(upper, "BANKNOTE SEPARATION") {
+			// Arah uang: KELUAR ("NOTES DISPENSED" di DN200V/Hitachi/Hyosung,
+			// "Banknote separation in cassette" di OKI). Wajib ke-reset di sini,
+			// bukan cuma pas TRANSACTION START: satu sesi kartu bisa isi setoran
+			// DULU baru penarikan (kejadian nyata: OKI rec 4098 setor lalu rec 4099
+			// tarik), dan tanpa reset ini penarikannya masih kebaca "uang masuk"
+			// terus salah ke-tag Selisih Kurang. Hitungan uang KELUAR juga nggak
+			// boleh jadi bukti skala nominal setor - lihat komentar di baris Amount.
 			current.NotesIn = false
 		} else if match := reNotesTotal.FindStringSubmatch(line); len(match) > 1 && current.NotesIn {
 			// Sengaja NGGAK ikut direset bareng Amount/SeqNr/Status pas percobaan
@@ -215,18 +273,18 @@ func ParseATMLogToCSV(rawLogPath, outputCSVPath string) (int, error) {
 			// kadang punya 2 baris "Rollback Notes" tapi cuma yang beneran
 			// ke-rollback yang diikuti "Rollback OK"; baris kedua cuma housekeeping
 			// penutupan transaksi dan bukan rollback sungguhan.
-			current.Status = "ROLLBACK OK"
+			setDanaKembali("ROLLBACK OK")
 		} else if strings.Contains(strings.ToUpper(line), "ROLLBACK NOTES SUCCESSFULLY") {
 			// Status EJ kedua (per keputusan 3 Sep 2026) yang berarti dana sudah
 			// keluar mesin: sama perlakuannya dengan "Rollback OK" buat kategorisasi
 			// Selisih Kurang (lihat diff.go), tapi disimpan apa adanya (bukan
 			// dinormalisasi jadi satu label generik) supaya EJ Status yang
 			// ditampilkan ke user tetap persis sama seperti di log mentah.
-			current.Status = "ROLLBACK NOTES SUCCESSFULLY"
+			setDanaKembali("ROLLBACK NOTES SUCCESSFULLY")
 		} else if strings.Contains(strings.ToUpper(line), "SHUTTER OPENED FOR NOTES REMOVAL") {
 			// Status EJ ketiga (per keputusan 3 Sep 2026), perlakuan sama seperti
 			// dua status rollback di atas.
-			current.Status = "SHUTTER OPENED FOR NOTES REMOVAL"
+			setDanaKembali("SHUTTER OPENED FOR NOTES REMOVAL")
 		}
 	}
 	flush()

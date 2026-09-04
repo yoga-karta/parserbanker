@@ -115,8 +115,11 @@ func TestParseATMLogToCSV_RollbackAfterEndNotAttributedToPrevTransaction(t *test
 // tapi transaksi yang "Rollback Notes"-nya nggak PERNAH diikuti "OK" sama
 // sekali harus tetap status aslinya (SUCCESS), bukan ROLLBACK.
 func TestParseATMLogToCSV_RollbackNotesWithoutOKIsNotRollback(t *testing.T) {
+	// Baris "NOTES COUNTED" wajib ada: rollback cuma sah kalau uangnya emang
+	// MASUK dulu (lihat setDanaKembali di parser.go).
 	raw := "09/07/2026 16:46:19 TRANSACTION START\n" +
 		"09/07/2026 16:46:19 CARD NUMBER 194634******6969\n" +
+		"09/07/2026 16:47:00 NOTES COUNTED:\n" +
 		"09/07/2026 16:47:03 Amount : 2400000\n" +
 		"09/07/2026 16:47:05 TRANSACTION REPLIED\n" +
 		"09/07/2026 16:47:05 TRAN SEQ NR [0694]\n" +
@@ -127,6 +130,7 @@ func TestParseATMLogToCSV_RollbackNotesWithoutOKIsNotRollback(t *testing.T) {
 		"09/07/2026 16:47:28 TRANSACTION END\n" +
 		"09/07/2026 16:48:01 TRANSACTION START\n" +
 		"09/07/2026 16:48:01 CARD NUMBER 111111\n" +
+		"09/07/2026 16:48:05 NOTES COUNTED:\n" +
 		"09/07/2026 16:48:10 Amount : 100000\n" +
 		"09/07/2026 16:48:15 TRANSACTION REPLIED\n" +
 		"09/07/2026 16:48:15 TRAN SEQ NR [0695]\n" +
@@ -167,8 +171,11 @@ func TestParseATMLogToCSV_RollbackNotesWithoutOKIsNotRollback(t *testing.T) {
 // "Rollback OK" buat kategorisasi Selisih Kurang (lihat diff.go), tapi
 // disimpan apa adanya di kolom status (bukan dinormalisasi ke satu label).
 func TestParseATMLogToCSV_RollbackNotesSuccessfullyAndShutterOpened(t *testing.T) {
+	// Baris "NOTES COUNTED" wajib ada: ketiga status cuma sah buat setoran yang
+	// uangnya emang MASUK dulu (lihat setDanaKembali di parser.go).
 	raw := "17/06/2026 10:00:00 TRANSACTION START\n" +
 		"17/06/2026 10:00:00 CARD NUMBER 111111\n" +
+		"17/06/2026 10:00:02 NOTES COUNTED:\n" +
 		"17/06/2026 10:00:05 Amount : 100000\n" +
 		"17/06/2026 10:00:10 TRANSACTION REPLIED\n" +
 		"17/06/2026 10:00:10 TRAN SEQ NR [0001]\n" +
@@ -176,6 +183,7 @@ func TestParseATMLogToCSV_RollbackNotesSuccessfullyAndShutterOpened(t *testing.T
 		"17/06/2026 10:00:20 TRANSACTION END\n" +
 		"17/06/2026 10:01:00 TRANSACTION START\n" +
 		"17/06/2026 10:01:00 CARD NUMBER 222222\n" +
+		"17/06/2026 10:01:02 NOTES COUNTED:\n" +
 		"17/06/2026 10:01:05 Amount : 200000\n" +
 		"17/06/2026 10:01:10 TRANSACTION REPLIED\n" +
 		"17/06/2026 10:01:10 TRAN SEQ NR [0002]\n" +
@@ -629,5 +637,225 @@ func TestParseATMLogToCSV_TerminalIDSurvivesNestedTransactionStart(t *testing.T)
 		if got := rows[i][2]; got != "S1CBPNR030" { // kolom terminal_id
 			t.Errorf("terminal_id baris %d = %q, want S1CBPNR030 (kehapus reset TRANSACTION START kedua)", i, got)
 		}
+	}
+}
+
+// TestParseATMLogToCSV_PINBoundaryIsCaseInsensitive menguji bug nyata di EJ
+// Hitachi & Hyosung: batas "percobaan baru di sesi kartu yang sama" dipatok ke
+// baris PIN, tapi pengecekannya case-sensitive ("PIN ENTERED") sementara kedua
+// merek itu nulisnya "PIN Entered:" - jadi batasnya NGGAK PERNAH kena dan
+// status percobaan BERIKUTNYA numpuk balik ke transaksi sebelumnya yang udah
+// kelar sukses. Kejadian nyata: Hitachi S1GSMDR001 rec 6037 (setor Rp4.900.000,
+// TRANSACTION REPLIED, struk "DEPOSIT ... KE TABUNGAN") ke-tag SHUTTER OPENED
+// FOR NOTES REMOVAL gara-gara pengembalian uang tertolak punya setoran
+// berikutnya. Ini yang bikin 87 baris SK palsu di Hitachi dan 124 di Hyosung.
+func TestParseATMLogToCSV_PINBoundaryIsCaseInsensitive(t *testing.T) {
+	// Cuplikan asli EJ Hitachi S1GSMDR001 rec 6037 - dipendekin, urutan
+	// barisnya dipertahankan.
+	raw := "08/19/2026 16:12:22 TRANSACTION START\n" +
+		"08/19/2026 16:12:22 Terminal ID    [S1GSMDR001]\n" +
+		"08/19/2026 16:12:33 PIN Entered: 519893******0534\n" +
+		"08/19/2026 16:12:57 Notes Counted:\n" +
+		"IDR100000x49\n" +
+		"Total Amount IDR 4900000\n" +
+		"08/19/2026 16:13:00 Amount : 000490000000\n" +
+		"08/19/2026 16:13:02 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 6037\n" +
+		"    DEPOSIT                 RP4.900.000  \n" +
+		// Percobaan setor BERIKUTNYA di sesi kartu yang sama: uang yang ditolak
+		// mesin dibalikin lewat shutter. Ini punya percobaan kedua, bukan 6037.
+		"08/19/2026 16:13:22 PIN Entered: 519893******0534\n" +
+		"08/19/2026 16:14:00 Notes Counted:\n" +
+		"IDR100000x10\n" +
+		"Rejectx2\n" +
+		"Total Amount IDR 1000000\n" +
+		"08/19/2026 16:14:05 Shutter opened for notes removal\n" +
+		"08/19/2026 16:14:20 Amount : 000100000000\n" +
+		"08/19/2026 16:14:22 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 6038\n" +
+		"08/19/2026 16:15:00 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+	rows := readCSV(t, outPath)
+	if len(rows) != 3 {
+		t.Fatalf("jumlah transaksi = %d, want 2", len(rows)-1)
+	}
+	if got := rows[1][len(rows[1])-1]; got != "SUCCESS" {
+		t.Errorf("rec 6037 status = %q, want SUCCESS (shutter punya percobaan berikutnya, bukan punya 6037)", got)
+	}
+	if got := rows[1][3]; got != "4900000" {
+		t.Errorf("rec 6037 amount = %q, want 4900000", got)
+	}
+}
+
+// TestParseATMLogToCSV_ShutterForRejectedNotesBeforeRequestIsNotRollback
+// menguji bug nyata di EJ OKI S1BGBRR006 rec 4000: setor Rp1.250.000 yang SUKSES
+// TOTAL (struk "DEPOSIT ... KE TABUNGAN", ada baris "Stored banknote"), tapi
+// mesin sempat buka shutter buat MENGEMBALIKAN 1 lembar uang yang ditolak
+// hitungan - dan itu terjadi SEBELUM permintaan ke host dikirim. Pengembalian
+// uang tertolak bukan rollback transaksi: yang nunjukkin dana beneran balik ke
+// nasabah cuma yang kejadian SESUDAH transaksinya kecatat di host.
+func TestParseATMLogToCSV_ShutterForRejectedNotesBeforeRequestIsNotRollback(t *testing.T) {
+	// Cuplikan asli EJ OKI S1BGBRR006 rec 4000 - dipendekin, urutan dipertahankan.
+	raw := "17/08/2026 07:03:42 TRANSACTION START\n" +
+		"17/08/2026 07:03:42 Terminal ID : S1BGBRR006\n" +
+		"17/08/2026 07:04:01 PIN ENTERED\n" +
+		"17/08/2026 07:04:16 Shutter Open -> Insert Cash\n" +
+		"17/08/2026 07:04:46 Counted banknote :\n" +
+		"IDR50000x15    \n" +
+		"IDR100000x5    \n" +
+		"Rejectx1       \n" +
+		"Total Amount IDR1250000\n" +
+		"17/08/2026 07:04:46 Shutter Opened for notes removal\n" + // balikin 1 lembar tertolak
+		"17/08/2026 07:04:56 Notes Removal detected\n" +
+		"17/08/2026 07:05:04 Amount : 1250000\n" + // permintaan ke host baru DI SINI
+		"17/08/2026 07:05:14 Stored banknote :\n" +
+		"    NO. REKORD 4000\n" +
+		"    DEPOSIT                 RP1.250.000 \n" +
+		"    KE TABUNGAN   \n" +
+		"17/08/2026 07:05:22 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+	rows := readCSV(t, outPath)
+	if got := rows[1][len(rows[1])-1]; got == "SHUTTER OPENED FOR NOTES REMOVAL" {
+		t.Errorf("rec 4000 status = %q, gak boleh status rollback (shutter-nya sebelum permintaan ke host, cuma balikin uang tertolak)", got)
+	}
+	if got := rows[1][3]; got != "1250000" {
+		t.Errorf("rec 4000 amount = %q, want 1250000", got)
+	}
+}
+
+// TestParseATMLogToCSV_ShutterOnWithdrawalIsNotRollback menguji bug nyata di EJ
+// OKI S1BGBRR006 rec 3982: PENARIKAN Rp450.000 yang normal. Di OKI, shutter yang
+// kebuka buat nasabah NGAMBIL uang yang barusan dikeluarkan mesin dicatat pakai
+// kalimat yang sama persis ("Shutter Opened for notes removal") dengan shutter
+// yang MENGEMBALIKAN setoran. Bedanya cuma arah uangnya: penarikan didahului
+// "Banknote separation in cassette" (uang KELUAR), setoran didahului "Counted
+// banknote" (uang MASUK). Tanpa beda arah ini, 1356 penarikan sukses biasa di
+// satu mesin OKI ke-tag Selisih Kurang senilai Rp1.052.900.000.
+func TestParseATMLogToCSV_ShutterOnWithdrawalIsNotRollback(t *testing.T) {
+	// Cuplikan asli EJ OKI S1BGBRR006 rec 3982 - dipendekin, urutan dipertahankan.
+	raw := "17/08/2026 01:21:22 TRANSACTION START\n" +
+		"17/08/2026 01:21:22 Terminal ID : S1BGBRR006\n" +
+		"17/08/2026 01:21:22 PIN ENTERED\n" +
+		"17/08/2026 01:21:34 Amount : 450000\n" +
+		"17/08/2026 01:22:19 Banknote separation in cassette : Succeeded\n" +
+		"IDR50000 :9    \n" +
+		"    NO. REKORD 3982\n" +
+		"    PENARIKAN  TABUNGAN   \n" +
+		"17/08/2026 01:22:19 Shutter Opened for notes removal\n" + // nasabah ambil uang tarikannya
+		"17/08/2026 01:22:29 Notes Removal detected\n" +
+		"17/08/2026 01:22:33 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+	rows := readCSV(t, outPath)
+	if got := rows[1][len(rows[1])-1]; got == "SHUTTER OPENED FOR NOTES REMOVAL" {
+		t.Errorf("rec 3982 status = %q, gak boleh status rollback (ini penarikan, uangnya KELUAR bukan balik)", got)
+	}
+}
+
+// TestParseATMLogToCSV_RejectedDepositIsRollback mengunci 2 contoh yang client
+// tegaskan MEMANG Selisih Kurang (REVISI.docx): Hitachi S1GSMDR001 rec 6041
+// (Rp9.500.000) dan OKI S1BGBRR006 rec 4842 (Rp2.500.000). Dua-duanya setoran
+// yang DITOLAK host lalu uangnya dibalikin ke nasabah - jadi syarat tambahan
+// "uang harus masuk dulu" dan "status harus sesudah permintaan ke host" gak
+// boleh sampai ikut ngebuang kasus yang bener ini.
+func TestParseATMLogToCSV_RejectedDepositIsRollback(t *testing.T) {
+	// Cuplikan asli REVISI.docx contoh 1 (Hitachi rec 6041) - dipendekin,
+	// urutan barisnya dipertahankan.
+	hitachi := "08/19/2026 16:16:55 TRANSACTION START\n" +
+		"08/19/2026 16:16:55 Terminal ID    [S1GSMDR001]\n" +
+		"08/19/2026 16:16:55 PIN Entered: 519893******0534\n" +
+		"08/19/2026 16:16:58 SHUTTER OPENED for notes insertion\n" +
+		"08/19/2026 16:17:26 Notes Counted:\n" +
+		"IDR100000x95\n" +
+		"Rejectx4\n" +
+		"Total Amount IDR 9500000\n" +
+		"08/19/2026 16:17:27 Shutter opened for notes removal\n" + // balikin 4 lembar tertolak, SEBELUM ke host
+		"08/19/2026 16:17:35 Deposit: Notes removal detected\n" +
+		"08/19/2026 16:17:43 TRANSACTION REQUESTING\n" +
+		"08/19/2026 16:17:43 Amount : 000950000000\n" +
+		"08/19/2026 16:17:45 TRANSACTION REPLIED\n" +
+		"    NO. REKORD 6041\n" +
+		"    DEPOSIT       \n" +
+		"    TRANSAKSI ANDA DITOLAK\n" +
+		"08/19/2026 16:18:08 Rollback Notes Successfully\n" + // dana beneran balik ke nasabah
+		"08/19/2026 16:18:08 Shutter opened for notes removal\n" +
+		"08/19/2026 16:18:21 TRANSACTION END\n"
+
+	// Cuplikan asli REVISI.docx contoh 2 (OKI rec 4842).
+	oki := "19/08/2026 15:59:37 TRANSACTION START\n" +
+		"19/08/2026 15:59:37 Terminal ID : S1BGBRR006\n" +
+		"19/08/2026 15:59:53 PIN ENTERED\n" +
+		"19/08/2026 15:59:59 Shutter Open -> Insert Cash\n" +
+		"19/08/2026 16:00:18 Counted banknote :\n" +
+		"IDR100000x25   \n" +
+		"Rejectx0       \n" +
+		"Total Amount IDR2500000\n" +
+		"19/08/2026 16:00:26 Amount : 2500000\n" +
+		"19/08/2026 16:00:28 (Host Sequence No. : 4842)\n" +
+		"    NO. REKORD 4842\n" +
+		"    DEPOSIT       \n" +
+		"    TRANSAKSI ANDA DITOLAK\n" +
+		"19/08/2026 16:00:36 Shutter Opened for notes removal\n" +
+		"19/08/2026 16:00:47 Notes Removal detected\n" +
+		"19/08/2026 16:00:47 Banknote returned : Succeeded\n" +
+		"19/08/2026 16:00:51 TRANSACTION END\n"
+
+	dir := t.TempDir()
+	inPath := filepath.Join(dir, "ej_raw.txt")
+	if err := os.WriteFile(inPath, []byte(hitachi+oki), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.csv")
+
+	if _, err := ParseATMLogToCSV(inPath, outPath); err != nil {
+		t.Fatal(err)
+	}
+	rows := readCSV(t, outPath)
+	if len(rows) != 3 {
+		t.Fatalf("jumlah transaksi = %d, want 2", len(rows)-1)
+	}
+	// Client nyebut EJ Status rec 6041 "Rollback Notes Successfully": baris
+	// shutter yang nyusul cuma akibat mekanis dari rollback yang barusan
+	// kecatat, jangan sampai nimpa indikator yang lebih spesifik itu.
+	if got := rows[1][len(rows[1])-1]; got != "ROLLBACK NOTES SUCCESSFULLY" {
+		t.Errorf("rec 6041 status = %q, want ROLLBACK NOTES SUCCESSFULLY", got)
+	}
+	if got := rows[1][3]; got != "9500000" {
+		t.Errorf("rec 6041 amount = %q, want 9500000", got)
+	}
+	if got := rows[2][len(rows[2])-1]; got != "SHUTTER OPENED FOR NOTES REMOVAL" {
+		t.Errorf("rec 4842 status = %q, want SHUTTER OPENED FOR NOTES REMOVAL", got)
+	}
+	if got := rows[2][3]; got != "2500000" {
+		t.Errorf("rec 4842 amount = %q, want 2500000", got)
 	}
 }
