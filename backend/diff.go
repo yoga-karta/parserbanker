@@ -95,7 +95,9 @@ func RunDiff(ctx context.Context, normalizedEJPath, rcPath, resultDBPath string,
 				CAST(TRY_CAST(seq_nr AS INTEGER) AS VARCHAR) AS rec_num,
 				%s AS ej_status
 			FROM read_csv('%s', header=true, delim=',', all_varchar=true)`,
-			trimText("timestamp"), trimText("terminal_id"), trimText("card_masked"),
+			// tanggal cuma ambil bagian tanggal sebelum spasi - kolom timestamp EJ
+			// isinya "25/07/2026 00:19:37", client cuma mau tanggalnya.
+			trimText("split_part(timestamp, ' ', 1)"), trimText("terminal_id"), trimText("card_masked"),
 			upperText(trimText("status")), normalizedEJPath),
 
 		fmt.Sprintf(`CREATE TABLE rc AS

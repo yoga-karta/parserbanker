@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,6 +93,45 @@ func TestRunDiff_SelisihKurangThreeStatuses(t *testing.T) {
 	}
 	if s.Match != 1 {
 		t.Errorf("Match = %d, want 1 (SUCCESS dengan nominal sama tetap match, bukan selisih_kurang)", s.Match)
+	}
+}
+
+// TestRunDiff_TanggalTanpaJam mastiin kolom tanggal cuma berisi tanggal, tanpa
+// jam - kolom timestamp EJ mentahnya "01/09/2026 10:00:00", yang boleh nyampe ke
+// tabel/modal/export cuma "01/09/2026".
+func TestRunDiff_TanggalTanpaJam(t *testing.T) {
+	dir := t.TempDir()
+
+	ejPath := filepath.Join(dir, "ej_normalized.csv")
+	ejCSV := "timestamp,card_masked,terminal_id,amount,seq_nr,status\n" +
+		"01/09/2026 10:00:00,111,T1,100000,1,SUCCESS\n"
+	if err := os.WriteFile(ejPath, []byte(ejCSV), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rcPath := filepath.Join(dir, "rc.txt")
+	rcTXT := "111/BNI;S1/1/1;0210/S1/111/1/VB;100000;D;1000000;01/09/26\n"
+	if err := os.WriteFile(rcPath, []byte(rcTXT), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	resultDBPath := filepath.Join(dir, "result.duckdb")
+	if _, err := RunDiff(context.Background(), ejPath, rcPath, resultDBPath, LoadOptions{SkipHeader: false}); err != nil {
+		t.Fatalf("RunDiff error: %v", err)
+	}
+
+	db, err := sql.Open("duckdb", resultDBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var tanggal string
+	if err := db.QueryRow(`SELECT tanggal FROM diff_result WHERE rec_num = '1'`).Scan(&tanggal); err != nil {
+		t.Fatal(err)
+	}
+	if tanggal != "01/09/2026" {
+		t.Errorf("tanggal = %q, want %q (tanpa jam)", tanggal, "01/09/2026")
 	}
 }
 
