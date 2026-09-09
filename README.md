@@ -8,6 +8,39 @@ Selisih Kurang, Tidak Ditemukan) siap diekspor ke Excel/TXT.
 Dipakai internal oleh staf cabang BNI — 1 laptop, 1 user, offline
 sepenuhnya, tanpa perlu paham coding sama sekali untuk memakainya.
 
+## Cara kerja
+
+1. User memuat satu file **EJ** dan satu file **RC** lewat UI.
+2. Backend mem-parse keduanya jadi baris transaksi (`parser.go`), lalu
+   join berdasarkan `rec_num` di DuckDB (`diff.go`).
+3. Setiap baris dikategorikan otomatis:
+
+   | Kategori | Kapan terjadi |
+   |---|---|
+   | `match` | Nominal EJ dan RC sama, transaksi normal (bukan rollback) |
+   | `selisih_kurang` | Nominal EJ = RC **dan** status EJ menunjukkan uang ditarik kembali (`ROLLBACK OK`, `ROLLBACK NOTES SUCCESSFULLY`, atau `SHUTTER OPENED FOR NOTES REMOVAL`) — indikasi bank tetap membukukan padahal mesin membatalkan transaksi |
+   | `tidak_ditemukan` | Rec num cuma ada di salah satu sisi (EJ atau RC), atau nominal kedua sisi tidak sama — butuh review manual |
+   | `data_invalid` | Baris tidak punya nominal yang valid untuk dibandingkan sama sekali |
+
+4. Hasil per kategori bisa difilter, dilihat detailnya, dan diekspor ke
+   Excel/TXT. Riwayat setiap run tersimpan permanen di `%AppData%`, bisa
+   dibuka lagi setelah aplikasi ditutup.
+
+Aturan kategorisasi di atas hasil dari beberapa putaran koreksi terhadap
+data real (lihat `docs/build-from-zero.md` Tahap 7) — bukan asumsi awal.
+
+### Merek mesin ATM yang didukung
+
+Parser sudah divalidasi terhadap format log dari 4 merek, tiap merek
+punya kuirk penulisan log yang berbeda (anchor nomor urut, mask kartu,
+format Terminal ID) dan ditangani lewat satu parser universal, bukan
+percabangan per merek:
+
+- **DN200V** — merek acuan awal, log paling lengkap
+- **Hyosung**
+- **Hitachi**
+- **OKI**
+
 ## Tech stack
 
 | Bagian | Teknologi |
@@ -28,7 +61,29 @@ docs/        Roadmap, catatan proses, dan panduan non-teknis
 .github/     Workflow CI yang build exe + installer di windows-latest
 ```
 
+## API backend
+
+Base URL `http://127.0.0.1:8080/api` (loopback only, bukan diakses dari luar):
+
+| Method | Path | Fungsi |
+|---|---|---|
+| POST | `/jobs` | Bikin job rekonsiliasi baru |
+| POST | `/jobs/:id/load/:role` | Upload file EJ atau RC (`role` = `ej`/`rc`) ke job |
+| POST | `/jobs/:id/process` | Jalankan proses pencocokan |
+| POST | `/jobs/:id/stop` | Batalkan proses yang sedang jalan |
+| POST | `/jobs/:id/reset` | Reset job ke state awal |
+| GET | `/jobs/:id` | Status job |
+| GET | `/jobs/:id/log` | Log proses |
+| GET | `/jobs/:id/results` | Ambil baris hasil (bisa difilter `?category=`) |
+| GET | `/jobs/:id/export` | Export hasil ke Excel/TXT |
+| GET | `/history` | Riwayat run sebelumnya (persisten, baca dari disk) |
+| DELETE | `/history` | Hapus semua riwayat |
+| GET | `/version` | Versi aplikasi yang sedang jalan |
+
 ## Menjalankan secara lokal
+
+Prasyarat: **Go 1.22**, **Node 22** (versi yang sama dipakai CI, lihat
+`.github/workflows/build-windows.yml`).
 
 Backend dan frontend jalan sebagai dua proses terpisah saat development:
 
@@ -53,6 +108,11 @@ cukup jalankan test:
 cd backend
 go test ./...
 ```
+
+Test suite (`parser_test.go`, `diff_test.go`) memakai cuplikan log EJ
+asli dari keempat merek ATM di atas sebagai fixture, bukan data sintetis
+— jadi regresi kategorisasi (lihat contoh kasus nyata di
+`docs/build-from-zero.md`) langsung ketahuan begitu ada yang berubah.
 
 ## Build production (exe + installer Windows)
 
