@@ -8,7 +8,58 @@ Selisih Kurang, Tidak Ditemukan) siap diekspor ke Excel/TXT.
 Dipakai internal oleh staf cabang BNI — 1 laptop, 1 user, offline
 sepenuhnya, tanpa perlu paham coding sama sekali untuk memakainya.
 
-## Cara kerja
+> **Cuma mau pakai aplikasinya, bukan baca soal kodenya?** Langsung ke
+> bagian [Download & Cara Pakai](#download--cara-pakai-untuk-user) di
+> bawah.
+
+## Download & Cara Pakai (untuk User)
+
+### 1. Download installer
+
+Belum ada halaman "Releases" resmi — cara ambil installer terbaru:
+
+1. Buka tab **[Actions](../../actions)** di repo GitHub ini.
+2. Klik run paling atas (tercentang hijau ✅) di branch `main`.
+3. Scroll ke bagian **Artifacts**, download **`ParseBankers-Setup`**
+   (file `.zip` berisi `ParseBankers-Setup.exe`).
+
+Butuh login GitHub yang punya akses ke repo ini. Kalau artifact-nya
+sudah hilang (kadaluarsa otomatis setelah beberapa waktu), minta
+developer buka tab Actions → **Run workflow** untuk bikin build baru,
+atau kirim langsung file installer lewat flashdisk/jaringan internal.
+
+### 2. Cara pasang (cukup sekali)
+
+1. Salin `ParseBankers-Setup.exe` ke laptop, lalu klik dua kali.
+2. Windows biasanya menampilkan layar biru **"Windows protected your
+   PC"** — ini **normal**, muncul karena aplikasi internal ini belum
+   didaftarkan ke Microsoft. Klik tulisan kecil **"More info"** → lalu
+   tombol **"Run anyway"**.
+3. Ikuti wizard: **Next → Next → Install → Finish.**
+4. Ikon **Parse Bankers** otomatis muncul di Desktop dan Start Menu.
+
+Layar biru ini bisa muncul lagi tiap kali pasang versi baru — tinggal
+ulangi langkah "More info → Run anyway".
+
+### 3. Cara pakai sehari-hari
+
+| Langkah | Yang dilakukan | Yang terjadi |
+|---|---|---|
+| 1 | Buka **Parse Bankers** dari ikon Desktop | Langsung ke halaman kerja, tanpa layar login |
+| 2 | Pilih file **EJ** hari itu | Jumlah transaksi yang berhasil dibaca ditampilkan |
+| 3 | Pilih file **RC** hari itu | Jumlah baris valid yang terbaca ditampilkan |
+| 4 | Tekan **Proses** | Pencocokan berjalan (hitungan detik); tombol **STOP** tersedia bila perlu dibatalkan |
+| 5 | Baca panel **ringkasan** | Total per kategori + total nominal tiap kategori |
+| 6 | Klik filter kategori | Tabel hanya menampilkan baris kategori itu — cek **Selisih Kurang** dulu, baru **Tidak Ditemukan** |
+| 7 | Tekan **Export** | File Excel/TXT tersimpan, siap dilampirkan ke laporan |
+| 8 | Mulai lagi | Tombol **Reset** membersihkan sesi; hasil lama tetap ada di panel **Riwayat** |
+
+Penjelasan lebih lengkap (termasuk batasan yang perlu diketahui) ada di
+[`docs/panduan-versi-mudah.md`](docs/panduan-versi-mudah.md).
+
+---
+
+## Cara kerja (untuk developer)
 
 ```mermaid
 flowchart TD
