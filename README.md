@@ -10,6 +10,24 @@ sepenuhnya, tanpa perlu paham coding sama sekali untuk memakainya.
 
 ## Cara kerja
 
+```mermaid
+flowchart TD
+    EJ[File EJ<br/>log mentah mesin ATM] --> Parse
+    RC[File RC<br/>settlement kas bank] --> Parse
+    Parse["parser.go<br/>parse jadi baris transaksi"] --> Diff["diff.go<br/>join by rec_num (DuckDB)"]
+    Diff --> Cat{Kategorisasi}
+    Cat -->|nominal sama, bukan rollback| Match[match]
+    Cat -->|nominal sama + status rollback| Kurang[selisih_kurang]
+    Cat -->|rec_num 1 sisi saja / nominal beda| Tidak[tidak_ditemukan]
+    Cat -->|nominal tidak valid| Invalid[data_invalid]
+    Match --> Hasil[Tabel hasil + filter kategori]
+    Kurang --> Hasil
+    Tidak --> Hasil
+    Invalid --> Hasil
+    Hasil --> Export[Export Excel / TXT]
+    Hasil --> Riwayat["Riwayat tersimpan permanen<br/>%AppData%\pilot-diff"]
+```
+
 1. User memuat satu file **EJ** dan satu file **RC** lewat UI.
 2. Backend mem-parse keduanya jadi baris transaksi (`parser.go`), lalu
    join berdasarkan `rec_num` di DuckDB (`diff.go`).
@@ -121,6 +139,18 @@ developer — ini juga cara satu-satunya release ini pernah dirakit
 (lihat `docs/build-from-zero.md`). Setiap push ke `main`, GitHub
 Actions (`.github/workflows/build-windows.yml`) di runner
 `windows-latest`:
+
+```mermaid
+flowchart LR
+    Push["push ke main /\nworkflow_dispatch"] --> FE["npm run build\n(frontend static export)"]
+    FE --> Embed["copy frontend/out\n→ backend/webui"]
+    Embed --> Icon["go-winres\nembed icon ke resource exe"]
+    Icon --> Build["go build\nCGO_ENABLED=1 GOOS=windows\n→ pilot-diff.exe"]
+    Build --> Dll["ambil WebView2Loader.dll\n(nuget)"]
+    Dll --> Inno["Inno Setup\ncompile installer/setup.iss"]
+    Inno --> Art1["Artifact:\nParseBankers-Setup.exe"]
+    Inno --> Art2["Artifact:\npilot-diff-raw-exe + dll"]
+```
 
 1. `npm run build` frontend (static export) → di-copy ke `backend/webui`
 2. Embed icon resmi ke resource exe (`go-winres`)
